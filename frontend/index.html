@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SEO Operating System</title>
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>🏛️ SEO-OS</h1>
+    <div class="header-controls">
+      <select id="project-selector" aria-label="Seleccionar proyecto"></select>
+      <button id="delete-project-btn" type="button" title="Eliminar proyecto seleccionado">🗑️ Eliminar</button>
+      <button id="open-new-project" type="button">➕ Nuevo proyecto</button>
+      <button id="open-quick-analysis" type="button">⚡ Análisis rápido de URL</button>
+      <button id="open-alerts" type="button">🔔 Alertas</button>
+      <button id="open-settings" type="button">⚙️ Configuración</button>
+      <span id="last-updated" class="last-updated">Cargando…</span>
+      <button id="open-audit-options" type="button" title="Elegir qué pasos correr">⚙️ Pasos</button>
+      <button id="run-audit-btn" class="primary">▶ Ejecutar auditoría</button>
+    </div>
+  </header>
+
+  <section id="audit-progress" class="audit-progress" hidden>
+    <div class="audit-progress-head">
+      <span class="audit-spinner" aria-hidden="true"></span>
+      <strong id="audit-progress-title">Ejecutando auditoría…</strong>
+      <span id="audit-progress-elapsed" class="audit-elapsed">0:00</span>
+    </div>
+    <div class="audit-bar-track"><div id="audit-bar-fill" class="audit-bar-fill"></div></div>
+    <div id="audit-progress-detail" class="audit-progress-detail">Preparando…</div>
+    <ol id="audit-steps" class="audit-steps"></ol>
+  </section>
+
+  <section id="scorecards" class="scorecards"></section>
+
+  <section style="padding: 0 20px;">
+    <div id="seo-score-panel"></div>
+  </section>
+
+  <section style="padding: 0 20px;">
+    <div id="scores-evolution-chart" class="chart-container"></div>
+  </section>
+
+  <section class="project-actions-bar">
+    <a id="open-report-link" href="#" target="_blank" rel="noopener">📄 Reporte</a>
+    <button id="open-action-plan" type="button">📋 Action Plan</button>
+    <button id="open-ai-chat" type="button">🤖 Asistente IA</button>
+    <button id="open-compare-audits" type="button">🕐 Comparar auditorías</button>
+  </section>
+
+  <nav class="tabs">
+    <button class="tab-button active" data-tab="rankings">📊 Rankings</button>
+    <button class="tab-button" data-tab="keywords">🔑 Keywords</button>
+    <button class="tab-button" data-tab="technical">🔧 Técnico</button>
+    <button class="tab-button" data-tab="geo">🤖 GEO</button>
+    <button class="tab-button" data-tab="content">📝 Contenido</button>
+    <button class="tab-button" data-tab="competitors">🆚 Competidores</button>
+    <button class="tab-button" data-tab="backlinks">🔗 Backlinks</button>
+    <button class="tab-button" data-tab="local">📍 Local</button>
+    <button class="tab-button" data-tab="coverage">🗺️ Cobertura</button>
+  </nav>
+
+  <main class="tab-content">
+    <div id="tab-rankings" class="tab-panel active">
+      <div id="rankings-chart" class="chart-container"></div>
+      <div class="filters-row">
+        <input id="query-filter" type="search" placeholder="Filtrar por keyword…" />
+      </div>
+      <div id="rankings-table"></div>
+    </div>
+
+    <div id="tab-keywords" class="tab-panel">
+      <div class="filters-row">
+        <label style="font-size:12px; color:var(--text-secondary);">
+          Período de Search Console:
+          <select id="keywords-gsc-lookback-select" style="margin-left:4px;">
+            <option value="7">Últimos 7 días</option>
+            <option value="28" selected>Últimos 28 días</option>
+            <option value="90">Últimos 3 meses</option>
+            <option value="180">Últimos 6 meses</option>
+            <option value="365">Últimos 12 meses</option>
+            <option value="480">Últimos 16 meses (máximo)</option>
+          </select>
+        </label>
+        <button id="refresh-gsc-period-btn" type="button">🔄 Actualizar con este período</button>
+        <span id="refresh-gsc-period-status" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+      <div class="filters-row">
+        <button id="classify-intent-btn" type="button">🧠 Clasificar intent con IA (top 20)</button>
+        <span id="classify-intent-status" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+      <div id="keywords-table"></div>
+
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">
+        💡 Ideas de keywords (preguntas relacionadas, Google Trends)
+      </h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        Búsquedas relacionadas a tus keywords actuales que todavía no rankeas — candidatas para contenido nuevo.
+      </p>
+      <div class="filters-row">
+        <button id="fetch-related-queries-btn" type="button">🔍 Buscar preguntas relacionadas (top 5 keywords, tarda ~1min)</button>
+        <span id="related-queries-status" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+      <div id="keyword-ideas-table"></div>
+
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">
+        ❓ Preguntas reales de Google (Autocomplete)
+      </h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        Preguntas reales que la gente escribe en Google sobre tus keywords de mayor impresiones —
+        respóndelas en el sitio para capturar esas búsquedas. "Ya hay datos" solo indica que Google
+        ya mostró impresiones para algo similar, no que el sitio ya la responde.
+      </p>
+      <div class="filters-row">
+        <button id="fetch-question-ideas-btn" type="button">❓ Buscar preguntas reales (top 5 keywords, tarda ~1min)</button>
+        <span id="question-ideas-status" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+      <div id="question-ideas-table"></div>
+
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">
+        🧩 Clusters de contenido (IA)
+      </h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        Agrupa tus keywords reales (rankings + ideas de Trends) por tema, con una página pilar sugerida por cluster — nunca inventa keywords nuevas, solo agrupa las que ya tienes.
+      </p>
+      <div class="filters-row">
+        <button id="generate-clusters-btn" type="button">🧩 Generar clusters con IA</button>
+        <span id="clusters-status" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+      <div id="content-clusters"></div>
+    </div>
+
+    <div id="tab-technical" class="tab-panel">
+      <div id="pagespeed-summary"></div>
+      <h3>🔎 Indexación real (Google)</h3>
+      <div id="indexation-summary"></div>
+      <div id="indexation-table"></div>
+      <div class="filters-row" style="justify-content: space-between; align-items: center;">
+        <h3 style="margin:0;">🔧 Semáforo técnico por página</h3>
+        <button id="copy-technical-btn" type="button">📋 Copiar tabla (para pegar en una IA)</button>
+      </div>
+      <div id="technical-table"></div>
+    </div>
+
+    <div id="tab-geo" class="tab-panel">
+      <div id="geo-summary"></div>
+      <div id="geo-table"></div>
+
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">
+        🧠 AI Visibility — qué responden Gemini/Claude/DeepSeek en vivo
+      </h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        Consulta en vivo la API real de cada proveedor configurado (Configuración → API keys) con una pregunta
+        de marca y preguntas de categoría reales (tus keywords de mayor impresiones). No es un promedio ni un
+        sentimiento calculado — es el texto tal cual lo devolvió el modelo, puede cambiar en la próxima corrida.
+      </p>
+      <div class="filters-row">
+        <button id="run-ai-visibility-btn" type="button">🧠 Consultar IA (puede tardar ~30s)</button>
+        <span id="ai-visibility-status" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+      <div id="ai-visibility-results"></div>
+    </div>
+
+    <div id="tab-content" class="tab-panel">
+      <div id="content-table"></div>
+    </div>
+
+    <div id="tab-competitors" class="tab-panel">
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🎯 Ranking real en Google (búsqueda en vivo, no promedio de GSC)</h3>
+      <div class="filters-row">
+        <input id="rank-tracking-keywords" type="text" placeholder="Keywords específicas, separadas por coma (vacío = top 20 por impresiones en GSC)" style="flex:1;" />
+        <button id="rank-tracking-btn" type="button">🔍 Verificar ranking real</button>
+      </div>
+      <span id="rank-tracking-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="rank-tracking-table" class="table-wrapper" style="margin-bottom:20px;"></div>
+
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🔎 Quién compite de verdad (según el top-10 real de Google)</h3>
+      <div id="serp-competitors" class="table-wrapper" style="margin-bottom:12px;"></div>
+      <div id="serp-beaten" style="margin-bottom:12px;"></div>
+
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">📐 Comparar mi página contra el top-10 de una keyword</h3>
+      <div class="filters-row">
+        <input id="serp-compare-keyword" type="text" placeholder="Escribe una keyword ya verificada (ej: reparacion de celulares cali)" style="flex:1;" />
+        <button id="serp-compare-btn" type="button">📐 Comparar</button>
+      </div>
+      <span id="serp-compare-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="serp-compare-result" style="margin-bottom:20px;"></div>
+
+      <div class="filters-row">
+        <input id="add-competitor-url" type="text" placeholder="https://competidor.com" style="flex:1;" />
+        <button id="add-competitor-btn" type="button">➕ Agregar y escanear</button>
+      </div>
+      <span id="add-competitor-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:12px;"></span>
+
+      <div class="filters-row">
+        <select id="competitor-selector"></select>
+        <button id="scan-competitor-btn" type="button">🔍 Re-escanear</button>
+        <span id="scan-competitor-status" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+      <div id="competitors-matrix" class="table-wrapper" style="margin-bottom:16px;"></div>
+
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase;">Keyword Gap</h3>
+      <div id="competitors-gaps" style="margin-bottom:16px;"></div>
+
+      <div class="filters-row" style="justify-content: space-between; align-items: center;">
+        <h3 style="margin:0; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🔬 Qué está haciendo bien (competidor seleccionado)</h3>
+        <button id="competitor-insights-btn" type="button">🪄 Generar insights con IA</button>
+      </div>
+      <div id="competitor-detail"></div>
+      <div id="competitor-insights"></div>
+    </div>
+
+    <div id="tab-backlinks" class="tab-panel">
+      <div class="filters-row">
+        <button id="collect-backlinks-btn" type="button">🔍 Actualizar backlinks</button>
+        <span id="collect-backlinks-status" style="font-size:12px; color:var(--text-muted);"></span>
+        <a id="disavow-link" href="#" download style="margin-left:auto;">
+          <button type="button">📥 Descargar disavow.txt</button>
+        </a>
+      </div>
+      <div id="backlinks-summary" class="scorecards" style="grid-template-columns: repeat(3, 1fr); padding:0; margin-bottom:16px;"></div>
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase;">Distribución de anchor text</h3>
+      <div id="backlinks-anchors" class="table-wrapper" style="margin-bottom:16px;"></div>
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase;">Backlinks</h3>
+      <div id="backlinks-table"></div>
+    </div>
+
+    <div id="tab-local" class="tab-panel">
+      <div class="filters-row">
+        <button id="collect-local-btn" type="button">🔍 Analizar SEO Local</button>
+        <span id="collect-local-status" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+      <div id="local-summary" class="scorecards" style="grid-template-columns: repeat(3, 1fr); padding:0; margin-bottom:16px;"></div>
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase;">Consistencia NAP (teléfono)</h3>
+      <div id="local-nap-table" class="table-wrapper" style="margin-bottom:16px;"></div>
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase;">Cobertura schema LocalBusiness</h3>
+      <div id="local-schema-summary" style="margin-bottom:16px;"></div>
+
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">📍 Ranking en Local Pack de Google Maps + reseñas (búsqueda real, no estimado)</h3>
+      <div class="filters-row">
+        <input id="local-rank-keywords" type="text" placeholder="Keywords específicas, separadas por coma (vacío = top 10 por impresiones en GSC)" style="flex:1;" />
+        <button id="local-rank-btn" type="button">🔍 Verificar Local Pack</button>
+      </div>
+      <span id="local-rank-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="local-rank-table" class="table-wrapper" style="margin-bottom:16px;"></div>
+
+      <div class="empty-state" style="font-size:12px;">
+        📋 Citations en directorios (Yelp, Facebook, otros directorios locales): siguen sin verificarse — requieren
+        una API externa distinta no configurada en este entorno. El ranking en Maps y el rating/reseñas de arriba
+        sí son datos reales (Serper), ver README.
+      </div>
+    </div>
+
+    <div id="tab-coverage" class="tab-panel">
+      <div class="filters-row">
+        <button id="collect-coverage-btn" type="button">🗺️ Analizar cobertura</button>
+        <span id="collect-coverage-status" style="font-size:12px; color:var(--text-muted);"></span>
+      </div>
+      <div id="coverage-summary" class="scorecards" style="grid-template-columns: repeat(4, 1fr); padding:0; margin-bottom:16px;"></div>
+      <div id="coverage-detail"></div>
+
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">🔗 Enlazado interno</h3>
+      <div id="coverage-links"></div>
+
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">📑 Duplicados y contenido thin</h3>
+      <div id="coverage-duplicates"></div>
+
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">📈 GA4 — conversiones por landing page</h3>
+      <div id="coverage-ga4"></div>
+    </div>
+  </main>
+
+
+  <div id="action-plan-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>📋 Action Plan</h2>
+        <div style="display:flex; gap:8px;">
+          <button id="copy-action-plan-btn" type="button">📋 Copiar todo</button>
+          <a id="export-csv-link" href="#" download>
+            <button type="button">📥 Exportar CSV</button>
+          </a>
+          <button id="close-action-plan">✕</button>
+        </div>
+      </div>
+      <div id="action-plan-body">Cargando…</div>
+    </div>
+  </div>
+
+  <div id="compare-audits-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>🕐 Comparar auditorías</h2>
+        <button id="close-compare-audits">✕</button>
+      </div>
+      <div id="compare-audits-body">Cargando…</div>
+    </div>
+  </div>
+
+  <div id="ai-chat-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>🤖 Asistente IA</h2>
+        <button id="close-ai-chat">✕</button>
+      </div>
+      <div id="ai-chat-messages" style="max-height: 360px; overflow-y: auto; margin-bottom: 12px;"></div>
+      <div id="ai-chat-status" style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;"></div>
+      <div style="display:flex; gap:8px;">
+        <input id="ai-chat-input" type="text" placeholder="Pregúntale sobre este proyecto…"
+               style="flex:1; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; padding: 8px 12px;" />
+        <button id="ai-chat-send" class="primary">Enviar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="new-project-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>➕ Nuevo proyecto</h2>
+        <button id="close-new-project">✕</button>
+      </div>
+      <form id="new-project-form" style="display:flex; flex-direction:column; gap:10px;">
+        <label>Nombre del negocio
+          <input id="np-name" type="text" required placeholder="Ej: Mi Negocio SAS"
+                 style="width:100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; padding: 8px 12px; margin-top:4px;" />
+        </label>
+        <label>URL del sitio
+          <input id="np-url" type="url" required placeholder="https://minegocio.com"
+                 style="width:100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; padding: 8px 12px; margin-top:4px;" />
+        </label>
+        <div style="display:flex; gap:10px;">
+          <label style="flex:1;">País
+            <input id="np-country" type="text" value="CO" maxlength="2"
+                   style="width:100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; padding: 8px 12px; margin-top:4px;" />
+          </label>
+          <label style="flex:1;">Idioma
+            <input id="np-language" type="text" value="es" maxlength="5"
+                   style="width:100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; padding: 8px 12px; margin-top:4px;" />
+          </label>
+        </div>
+        <label>Competidores (opcional, separados por coma)
+          <input id="np-competitors" type="text" placeholder="competidor1.com, competidor2.com"
+                 style="width:100%; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; padding: 8px 12px; margin-top:4px;" />
+        </label>
+        <div id="new-project-error" style="color: var(--accent-red); font-size:13px;"></div>
+        <button type="submit" class="primary">Crear proyecto</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="alerts-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>🔔 Alertas por Telegram</h2>
+        <button id="close-alerts">✕</button>
+      </div>
+      <p style="font-size:13px; color:var(--text-secondary); margin-top:0;">
+        Cuando el scheduler diario corre, avisa por Telegram si detecta una caída real de score
+        (≥10 puntos) o una issue crítica nueva. No es un reporte de "todo bien" cada día — solo excepciones.
+      </p>
+      <div id="alerts-status" style="margin-bottom:12px;"></div>
+      <button id="send-test-alert-btn" type="button">📨 Enviar mensaje de prueba</button>
+      <div id="alerts-test-result" style="margin-top:10px; font-size:13px;"></div>
+    </div>
+  </div>
+
+  <div id="audit-options-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>⚙️ Pasos de la auditoría</h2>
+        <button id="close-audit-options">✕</button>
+      </div>
+      <p style="font-size:13px; color:var(--text-secondary); margin-top:0;">
+        Elige qué pasos correr en "Ejecutar auditoría" — útil para probar solo uno sin esperar los
+        demás. Se recuerda para la próxima vez. Los pasos desmarcados simplemente no corren; no
+        borran datos que ya tenías.
+      </p>
+      <div class="filters-row" style="margin-bottom:8px;">
+        <button id="audit-options-select-all" type="button">Marcar todos</button>
+        <button id="audit-options-select-none" type="button">Desmarcar todos</button>
+      </div>
+      <div id="audit-options-steps"></div>
+
+      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:20px;">
+        Rango de fechas — Search Console
+      </h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        Search Console puede mostrar distintos períodos (7 días, 28 días, 3/6/12/16 meses) — elige
+        cuál traer en el paso "Rankings de Search Console". Cada corrida reemplaza los datos de
+        keywords con los del período elegido.
+      </p>
+      <select id="gsc-lookback-select">
+        <option value="7">Últimos 7 días</option>
+        <option value="28" selected>Últimos 28 días (por defecto)</option>
+        <option value="90">Últimos 3 meses</option>
+        <option value="180">Últimos 6 meses</option>
+        <option value="365">Últimos 12 meses</option>
+        <option value="480">Últimos 16 meses (máximo de Search Console)</option>
+      </select>
+    </div>
+  </div>
+
+  <div id="settings-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>⚙️ Configuración</h2>
+        <button id="close-settings">✕</button>
+      </div>
+      <p style="font-size:13px; color:var(--text-secondary); margin-top:0;">
+        Guarda tus API keys aquí en vez de editar <code>.env</code> a mano. Un valor guardado aquí
+        reemplaza al de <code>.env</code> mientras esté guardado; "Volver a .env" lo borra y usa el
+        de siempre. La key nunca se muestra de vuelta una vez guardada — solo si está configurada.
+      </p>
+      <div id="settings-fields"></div>
+    </div>
+  </div>
+
+  <div id="quick-analysis-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>⚡ Análisis rápido de URL</h2>
+        <button id="close-quick-analysis">✕</button>
+      </div>
+      <p style="font-size:13px; color:var(--text-secondary); margin-top:0;">
+        Analiza cualquier página pública al instante (title, meta, H1, schema, GEO). Es una foto de esa página —
+        no incluye keywords posicionadas, rankings ni competidores porque eso requiere un proyecto completo.
+        Si quieres explorar todo eso, agrega el sitio como proyecto desde el resultado.
+      </p>
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <input id="qa-url" type="url" placeholder="https://cualquier-sitio.com/pagina"
+               style="flex:1; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; padding: 8px 12px;" />
+        <button id="qa-run" class="primary">Analizar</button>
+      </div>
+      <div id="quick-analysis-result"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>

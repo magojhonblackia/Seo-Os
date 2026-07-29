@@ -1,0 +1,28 @@
+# Secretos — nunca commitear
+.env
+credentials/
+*.json.key
+
+# Datos (el histórico vive local, no en git)
+data/
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Frontend vendor descargado (se re-descarga con el script de setup)
+frontend/vendor/*.js
+!frontend/vendor/.gitkeep
+
+# Editor / OS
+.DS_Store
+.vscode/
+
+# Repos de terceros descargados para investigación (no forman parte del
+# proyecto, no se commitean — ver README § herramientas de mercado)
+/SKILL/
