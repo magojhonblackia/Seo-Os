@@ -5,8 +5,14 @@ para la especificación completa (arquitectura, reglas, fases, agentes).
 
 > 🚀 **¿Vas a instalar esto?** Empieza por [SELFHOST.md](SELFHOST.md) — guía
 > corta de auto-hospedaje, pensada para seguirla directo o pegarla en un chat
-> con una IA. Lo de abajo es el historial completo de cómo se construyó cada
-> feature (útil para seguir desarrollando, no para instalar por primera vez).
+> con una IA.
+>
+> 📖 **¿Quieres saber qué hace todo el sistema y cómo?** Ver
+> [FEATURES.md](FEATURES.md) — referencia completa de cada módulo, de dónde
+> saca cada dato real, y por qué está diseñado así.
+>
+> Lo de abajo es el historial completo de cómo se construyó cada feature
+> (útil para seguir desarrollando, no para instalar por primera vez).
 
 **Estado actual: Fases 0, 1, 2, 3 y 4 completas**, más features añadidas a
 pedido del usuario (nuevo proyecto, análisis rápido de URL, eliminar
