@@ -1385,3 +1385,8 @@ directorios externos (Google Business Profile, Yelp — requieren su propia
 API, no configurada). Ver §9 de `PROMPT_MAESTRO.md` para Fase 5 (solo si el
 uso diario lo justifica): comparación de renders, crawl budget, multiusuario,
 API pública, white label, migración a Postgres/Next.js.
+
+## Licencia
+
+MIT — ver [LICENSE](LICENSE). Úsalo, modifícalo, autohospédalo para lo que
+quieras, con o sin fines comerciales; solo mantén el aviso de copyright.
