@@ -775,6 +775,34 @@ impresiones.
 
 Suite: 597 tests.
 
+### El reporte no traía 4 tabs completas del dashboard (2026-08-02)
+
+El usuario preguntó, con toda razón: "¿el reporte trae TODO lo que veo en el
+dashboard, o hay que revisar otras opciones aparte?" — la respuesta honesta
+era que NO. Comparando las funciones que `reports.py` importa contra todas
+las que existen en `routes_dashboard.py`, faltaban 4 secciones completas:
+**GA4** (conversiones orgánicas), **Contenido/E-E-A-T** (legibilidad, fechas
+de actualización por página), **Preguntas reales** (Google Autocomplete,
+§ mejoras 2026-07-27) y **Competidores** (matriz + keyword gap). Ninguna se
+conectó al reporte cuando se construyó cada feature — el mismo patrón de bug
+ya documentado arriba ("El reporte medía cosas que nunca mostraba"), que
+volvió a aparecer en features agregadas después de esa corrección.
+
+Se agregaron las 4, siguiendo el mismo criterio del resto del reporte:
+reutilizar las funciones ya probadas de `routes_dashboard.py` (una sola
+fuente de verdad por sección), degradar con gracia si no hay datos
+(`empty_reason`), y nunca reinterpretar el dato — el keyword gap deja
+explícito que es "una señal de qué tema parece targetear el competidor
+según su title/H1", no un ranking confirmado.
+
+Verificado en vivo contra jc: las 4 secciones renderizan con datos reales
+(75 preguntas reales, 126 páginas con legibilidad/E-E-A-T, matriz de 5
+competidores con notas honestas sobre los que no se pudieron escanear) — y
+GA4 muestra correctamente "sin configurar" en vez de una tabla vacía, porque
+ese proyecto no tiene `GA4_PROPERTY_ID` configurado.
+
+Suite: 598 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

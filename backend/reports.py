@@ -29,6 +29,9 @@ from backend.api.routes_dashboard import (
     get_action_plan,
     get_ai_visibility,
     get_backlinks,
+    get_competitors,
+    get_content,
+    get_ga4,
     get_geo,
     get_keyword_ideas,
     get_indexation,
@@ -36,6 +39,7 @@ from backend.api.routes_dashboard import (
     get_local_pack,
     get_local_seo,
     get_pagespeed,
+    get_question_ideas,
     get_rank_tracking,
     get_scorecards,
     get_serp_analysis,
@@ -222,6 +226,10 @@ async def generate_html_report(project: dict) -> str:
     indexation = get_indexation(project)
     site_health = get_site_health(project)
     rank_tracking = get_rank_tracking(project)
+    ga4_data = get_ga4(project)
+    content_data = get_content(project)
+    question_ideas = get_question_ideas(project)
+    competitors_data = get_competitors(project)
     deltas = _score_history_deltas(project["id"])
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -635,6 +643,103 @@ async def generate_html_report(project: dict) -> str:
             )
         )
 
+    # ---------- Competidores: matriz + keyword gap (§ 2026-08-02, faltaba en el reporte) ----------
+    comp_matrix = competitors_data.get("matrix") or []
+    if competitors_data.get("empty_reason") or len(comp_matrix) <= 1:
+        competitors_block = f'<p class="muted">{_esc(competitors_data.get("empty_reason") or "Sin competidores registrados.")}</p>'
+    else:
+        gaps = competitors_data.get("gaps") or {}
+        rows_html = "".join(
+            f'<tr><td>{_esc(r["domain"])}{" (tú)" if r.get("is_own_site") else ""}</td>'
+            f'<td>{r["pages_crawled"] if r.get("pages_crawled") is not None else "—"}</td>'
+            f'<td>{r["technical_score"] if r.get("technical_score") is not None else "—"}</td>'
+            f'<td>{r["geo_score"] if r.get("geo_score") is not None else "—"}</td>'
+            f'<td>{_esc(r.get("note") or "—")}</td></tr>'
+            for r in comp_matrix
+        )
+        gap_items = "".join(
+            f'<li><strong>{_esc(domain)}:</strong> ' + (
+                ", ".join(_esc(g["competitor_topic"]) for g in domain_gaps[:8]) if domain_gaps else "sin gaps detectados"
+            ) + "</li>"
+            for domain, domain_gaps in gaps.items()
+        )
+        competitors_block = (
+            "<table><thead><tr><th>Dominio</th><th>Páginas crawleadas</th><th>Técnico</th><th>GEO</th><th>Nota</th></tr></thead><tbody>"
+            + rows_html
+            + "</tbody></table>"
+            + (
+                f'<p style="margin-top:10px;"><strong>Posibles gaps de contenido</strong> (temas del title/H1 del '
+                f"competidor con poco overlap con tus keywords reales de GSC — NO es un ranking confirmado, es una "
+                f"señal de qué tema parece targetear):</p><ul>{gap_items}</ul>"
+                if gap_items
+                else ""
+            )
+        )
+
+    # ---------- Contenido y E-E-A-T por página (§ 2026-08-02, faltaba en el reporte) ----------
+    content_pages = content_data.get("pages") or []
+    if content_data.get("empty_reason") or not content_pages:
+        content_block = f'<p class="muted">{_esc(content_data.get("empty_reason") or "Sin páginas crawleadas todavía.")}</p>'
+    else:
+        low_readability = [p for p in content_pages if (p.get("readability_score") or 0) < 60]
+        no_date = [p for p in content_pages if not p.get("has_date")]
+        content_block = (
+            f'<p>{len(content_pages)} página(s) analizada(s). '
+            f'<strong>{len(low_readability)}</strong> con legibilidad baja (&lt;60, escala Fernández-Huerta) · '
+            f'<strong>{len(no_date)}</strong> sin fecha de publicación/actualización visible (señal E-E-A-T).</p>'
+            "<table><thead><tr><th>Página</th><th>Palabras</th><th>Legibilidad</th><th>E-E-A-T</th><th>Autoría</th><th>Fecha visible</th></tr></thead><tbody>"
+            + "".join(
+                f'<tr><td>{_esc(p["url"])}</td><td>{p.get("word_count") if p.get("word_count") is not None else "—"}</td>'
+                f'<td>{p.get("readability_score") if p.get("readability_score") is not None else "—"}</td>'
+                f'<td>{p.get("eeat_score") if p.get("eeat_score") is not None else "—"}</td>'
+                f'<td>{"✅" if p.get("has_author") else "—"}</td><td>{"✅" if p.get("has_date") else "—"}</td></tr>'
+                for p in content_pages
+            )
+            + "</tbody></table>"
+        )
+
+    # ---------- Preguntas reales de Google (§ 2026-08-02, faltaba en el reporte) ----------
+    question_rows = question_ideas.get("ideas") or []
+    if not question_rows:
+        question_ideas_block = f'<p class="muted">{_esc(question_ideas.get("empty_reason") or "Sin preguntas reales cargadas todavía.")}</p>'
+    else:
+        question_ideas_block = (
+            f'<p>{len(question_rows)} pregunta(s) real(es) encontradas vía Google Autocomplete, sembradas con tus '
+            f'keywords reales de mayor impresión en GSC. "Ya hay datos" solo indica que Google ya mostró impresiones '
+            f'para algo similar — no que el sitio ya la responde.</p>'
+            "<table><thead><tr><th>Pregunta real</th><th>A partir de</th><th>Ya hay datos</th></tr></thead><tbody>"
+            + "".join(
+                f'<tr><td>{_esc(q["question"])}</td><td>{_esc(q.get("seed_keyword") or "—")}</td>'
+                f'<td>{"✅ sí" if q.get("already_has_real_data") else "—"}</td></tr>'
+                for q in question_rows[:40]
+            )
+            + "</tbody></table>"
+            + (f'<p class="muted" style="margin-top:6px;">Mostrando 40 de {len(question_rows)}.</p>' if len(question_rows) > 40 else "")
+        )
+
+    # ---------- GA4: conversiones orgánicas reales (§ 2026-08-02, faltaba en el reporte) ----------
+    if not ga4_data.get("available"):
+        ga4_block = f'<p class="muted">{_esc(ga4_data.get("empty_reason") or "GA4 no configurado.")}</p>'
+    else:
+        ga4_rows = ga4_data.get("rows") or []
+        totals = ga4_data.get("totals") or {}
+        ga4_block = (
+            f'<p>Últimos {_esc(ga4_data.get("days"))} días · métrica de conversión: '
+            f'<strong>{_esc(ga4_data.get("conversion_metric"))}</strong>.</p>'
+            f'<p><strong>{totals.get("sessions", 0)} sesiones</strong> orgánicas, '
+            f'<strong>{totals.get("conversions", 0)} conversiones</strong> reales, medido {_esc(ga4_data.get("analyzed_at"))}.</p>'
+            + (
+                "<table><thead><tr><th>Landing page</th><th>Sesiones</th><th>Conversiones</th></tr></thead><tbody>"
+                + "".join(
+                    f'<tr><td>{_esc(r.get("landing_page"))}</td><td>{r.get("sessions")}</td><td>{r.get("conversions")}</td></tr>'
+                    for r in ga4_rows[:30]
+                )
+                + "</tbody></table>"
+                if ga4_rows
+                else ""
+            )
+        )
+
     # ---------- Datos que NO tenemos — honestidad explícita, nunca se omiten en silencio ----------
     # OJO (2026-07-25): esta lista se corrigió al detectar que declaraba como
     # "no medible" cosas que el software YA mide (reseñas de Google vía Serper
@@ -755,6 +860,9 @@ async def generate_html_report(project: dict) -> str:
   <h2>🔑 Keywords Principales (Search Console real)</h2>
   {keywords_block}
 
+  <h2>❓ Preguntas reales de Google (Autocomplete)</h2>
+  {question_ideas_block}
+
   <h2>🎯 Oportunidades cerca del Top 10 (posición 11-20 real)</h2>
   {opp_block}
 
@@ -772,6 +880,9 @@ async def generate_html_report(project: dict) -> str:
 
   <h2>🔧 Técnico</h2>
   <p>🟢 {tech_summary.get("green", 0)} · 🟡 {tech_summary.get("yellow", 0)} · 🔴 {tech_summary.get("red", 0)} (celdas del semáforo, todas las páginas)</p>
+
+  <h2>📝 Contenido y E-E-A-T por página</h2>
+  {content_block}
 
   <h2>⚡ Core Web Vitals por página (PageSpeed Insights real)</h2>
   {cwv_block}
@@ -803,8 +914,14 @@ async def generate_html_report(project: dict) -> str:
   <h2>🔎 SERP real — contra quién competimos de verdad</h2>
   {serp_block}
 
+  <h2>🎯 Competidores</h2>
+  {competitors_block}
+
   <h2>🔗 Backlinks</h2>
   {backlinks_block}
+
+  <h2>📊 GA4 — conversiones orgánicas reales</h2>
+  {ga4_block}
 
   <h2>❓ Lo que NO medimos todavía (honestidad explícita)</h2>
   {not_available_block}

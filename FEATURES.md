@@ -251,11 +251,14 @@ de score) por Telegram.
 
 ### 📄 Reportes HTML/PDF
 **Qué hace**: documento standalone e imprimible con TODO lo medido —
-scorecards, Action Plan, técnico, GEO, AI Visibility, local, SERP real,
-backlinks, CTR, y una sección explícita de "lo que NO medimos todavía"
-(honestidad: nunca se presenta como medido algo que no se midió, ni se
-subestima algo que sí se mide). Ideas de contenido redactadas por IA a
-partir de oportunidades reales.
+scorecards, Action Plan, técnico, Contenido/E-E-A-T, GEO, AI Visibility,
+local, SERP real, Competidores, backlinks, GA4, CTR, preguntas reales, y una
+sección explícita de "lo que NO medimos todavía" (honestidad: nunca se
+presenta como medido algo que no se midió, ni se subestima algo que sí se
+mide). Ideas de contenido redactadas por IA a partir de oportunidades reales.
+Pensado para pegarse completo en una IA — si algo aparece en el dashboard,
+debe aparecer aquí también (bug real corregido dos veces: 2026-07-25 y
+2026-08-02, ver README.md).
 **Cómo**: `backend/reports.py`, reutiliza las mismas funciones que
 `routes_dashboard.py` — una sola fuente de verdad por sección. Sin
 dependencia nueva de PDF: usa "Imprimir → Guardar como PDF" del navegador.

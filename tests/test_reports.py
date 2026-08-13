@@ -11,7 +11,7 @@ from sqlalchemy import insert
 
 from backend.api.deps import get_project_or_404
 from backend.db.database import get_connection, now_iso
-from backend.db.schema import ai_visibility_checks, gsc_daily, gsc_queries, issues, pages, projects, scores, snapshots
+from backend.db.schema import ai_visibility_checks, gsc_daily, gsc_queries, issues, keywords, pages, projects, scores, snapshots
 from backend.main import app
 from backend.reports import generate_html_report
 
@@ -392,3 +392,69 @@ async def test_reporte_incluye_las_secciones_de_datos_medidos():
     assert "URL is unknown to Google" in html  # veredicto textual de Google
     assert "300" in html and "40" in html      # triángulo de cobertura
     assert "#7" in html                        # posición real en el SERP
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_ga4_contenido_preguntas_y_competidores():
+    """Regresión real 2026-08-02: el mismo patrón de bug de arriba (datos
+    reales en la DB que nunca llegaban al reporte) se repitió para 4
+    secciones más — GA4, Contenido/E-E-A-T, Preguntas reales y Competidores —
+    detectado porque el usuario preguntó "¿el reporte trae TODO lo que veo en
+    el dashboard?" y la respuesta honesta era que no."""
+    project = _make_project("test-report-ga4-contenido-competidores")
+    pid = project["id"]
+
+    with get_connection() as conn:
+        # Contenido / E-E-A-T
+        conn.execute(
+            insert(pages).values(
+                project_id=pid, url="https://reporte-test.com/legible-baja",
+                first_seen=now_iso(), word_count=500, readability_score=42,
+                eeat_score=60, has_author=False, has_date=False,
+            )
+        )
+        # Preguntas reales (source='question_ideas', mismo formato que
+        # persist_question_ideas() en backend/collectors/question_ideas.py)
+        conn.execute(
+            insert(keywords).values(
+                project_id=pid, keyword="por que mi celular no prende",
+                source="question_ideas", volume=None,
+                trend_data={"seed_keyword": "celular no prende", "already_has_real_data": True},
+                intent=None, last_updated=now_iso(),
+            )
+        )
+        # GA4
+        conn.execute(
+            insert(snapshots).values(
+                project_id=pid, collector="ga4", status="ok",
+                started_at=now_iso(), finished_at=now_iso(),
+                raw_data={
+                    "days": 30, "conversion_metric": "keyEvents",
+                    "rows": [{"landing_page": "/", "sessions": 120, "conversions": 4.0}],
+                },
+                created_at=now_iso(),
+            )
+        )
+        # Competidor registrado + escaneado
+        conn.execute(
+            projects.update().where(projects.c.id == pid).values(competitors=["competidor-real.com"])
+        )
+        conn.execute(
+            insert(snapshots).values(
+                project_id=pid, collector="competitor:competidor-real.com", status="ok",
+                started_at=now_iso(), finished_at=now_iso(),
+                raw_data={"pages_crawled": 12, "technical_score": 70, "geo_score": 50, "sample_keywords": []},
+                created_at=now_iso(),
+            )
+        )
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-ga4-contenido-competidores"))
+
+    for titulo in ["GA4 — conversiones", "Contenido y E-E-A-T", "Preguntas reales de Google", "Competidores</h2>"]:
+        assert titulo in html, f"falta la sección: {titulo}"
+
+    assert "120" in html and "keyEvents" in html            # GA4 real
+    assert "reporte-test.com/legible-baja" in html            # página real
+    assert "por que mi celular no prende" in html             # pregunta real
+    assert "competidor-real.com" in html and "12" in html     # competidor real
