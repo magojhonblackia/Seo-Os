@@ -135,6 +135,30 @@ pages = Table(
     # arreglado, pero por una vía distinta. Persistirlo aquí hace que la
     # cobertura de redirects SUME entre corridas en vez de resetear cada vez.
     Column("redirected_to", Text),
+    # § mejoras 2026-08-02: extraíbilidad de respuestas por IA (adaptado del
+    # módulo M11 del plugin claude-seo-ai, verificado en vivo contra jc antes
+    # de confiar en la heurística — ver README). Encabezados en forma de
+    # pregunta con una respuesta directa corta (40-60 palabras) justo después
+    # son lo que un motor de IA puede citar sin leer todo el artículo.
+    Column("question_headings_count", Integer),
+    Column("question_headings_without_answer", Integer),
+    Column("answers_in_target_band", Integer),
+    Column("long_passages_over_250w", Integer),
+    Column("has_tldr_or_summary", Boolean),
+    # § mejoras 2026-08-02: densidad de datos/hechos (adaptado del módulo M12
+    # de claude-seo-ai, ver comentario en question_headings_count arriba).
+    Column("numeric_density_per_100w", Float),
+    Column("passages_30w_plus_without_numbers", Integer),
+    Column("original_data_signal", Boolean),
+    Column("vague_authority_claims_count", Integer),
+    Column("authoritative_outbound_links", Integer),
+    # § mejoras 2026-08-02: frescura real (adaptado del módulo M13 de
+    # claude-seo-ai) — cruza dateModified del schema contra el header HTTP
+    # Last-Modified real del servidor, para detectar cuando el schema dice
+    # "actualizado hace poco" pero el servidor no cambió nada en meses.
+    Column("http_last_modified", Text),
+    Column("schema_date_published", Text),
+    Column("schema_date_modified", Text),
     UniqueConstraint("project_id", "url", name="uq_pages_project_url"),
 )
 

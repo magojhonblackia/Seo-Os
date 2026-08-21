@@ -378,6 +378,26 @@ def test_schema_sin_campo_requerido_se_detecta_y_agrupa_por_template():
     assert issues[0].severity == "high" and issues[0].category == "schema"
 
 
+def test_schema_faqpage_no_afirma_que_bloquea_rich_result_de_google():
+    """Bug real 2026-08-02 (detectado revisando el plugin claude-seo-ai):
+    Google eliminó el rich result de FAQPage en agosto 2023 — decir 'Google no
+    muestra el snippet' sin mainEntity ya es una afirmación falsa, sin importar
+    qué tan completo esté el schema. Debe seguir marcándose (útil para que una
+    IA extraiga la respuesta) pero con severidad baja y sin la frase falsa."""
+    from backend.analyzers.schema_validation import build_schema_issues, validate_pages_schema
+
+    pages = [{"url": "https://x.com/faq", "status_code": 200,
+              "schema_nodes": [{"types": ["FAQPage"], "fields": []}]}]
+    v = validate_pages_schema(pages)
+    issues = build_schema_issues(v)
+
+    assert len(issues) == 1
+    assert issues[0].severity == "medium"  # nunca "high" — no hay rich result que bloquear
+    assert "Google ya no muestra" in issues[0].title
+    assert "eliminó" in issues[0].suggested
+    assert "Google NO muestra el rich snippet" not in issues[0].suggested  # la frase falsa vieja
+
+
 def test_schema_acepta_equivalentes_documentados():
     from backend.analyzers.schema_validation import validate_schema_node
 

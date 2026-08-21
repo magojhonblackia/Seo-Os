@@ -35,12 +35,24 @@ SCHEMA_RULES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     ),
     "Organization": (("name", "url"), ("logo", "sameAs")),
     "Product": (("name",), ("image", "description", "brand", "sku", "offers")),
+    # FAQPage (§ mejoras 2026-08-02): Google eliminó el rich result de FAQPage
+    # en agosto 2023 (y el de HowTo en 2023 también) — ya NO existe snippet que
+    # "desbloquear" con mainEntity completo, sin importar qué tan bien esté el
+    # schema. Sigue siendo un tipo válido que Google/las IAs pueden parsear
+    # (útil para extracción de respuestas), pero afirmar que falta el rich
+    # snippet de Google ya es una afirmación falsa — ver DEPRECATED_RICH_RESULT_TYPES.
     "FAQPage": (("mainEntity",), ()),
     "BreadcrumbList": (("itemListElement",), ()),
     "Article": (("headline",), ("image", "datePublished", "dateModified", "author")),
     "BlogPosting": (("headline",), ("image", "datePublished", "dateModified", "author")),
     "Event": (("name", "startDate", "location"), ("image", "description", "offers")),
 }
+
+# Tipos cuyo rich result de Google ya no existe (eliminados en 2023) — ver nota
+# en SCHEMA_RULES. build_schema_issues() los trata distinto: nunca "bloquea un
+# rich snippet" (no hay snippet que bloquear), solo pueden ayudar a la
+# extracción de respuestas por IA.
+DEPRECATED_RICH_RESULT_TYPES = {"FAQPage", "HowTo"}
 
 # Alternativas aceptadas: si falta el campo A pero está B, cuenta como presente.
 _EQUIVALENTS: dict[str, tuple[str, ...]] = {
@@ -131,6 +143,31 @@ def build_schema_issues(validation: dict) -> list[MagoIssue]:
     issues: list[MagoIssue] = []
     for group in validation.get("incomplete_groups", []):
         missing = ", ".join(group["missing_required"])
+        if group["type"] in DEPRECATED_RICH_RESULT_TYPES:
+            # § mejoras 2026-08-02: Google eliminó este rich result en 2023 —
+            # decir "Google no muestra el snippet" ya es falso sin importar el
+            # campo. Severidad baja: puede ayudar a que una IA extraiga la
+            # respuesta, pero no hay snippet de Google que desbloquear.
+            issues.append(
+                MagoIssue(
+                    severity="medium",
+                    category="schema",
+                    title=(
+                        f"Schema {group['type']} sin campo(s) [{missing}] en {group['pages_affected']} página(s) "
+                        "(Google ya no muestra este rich result)"
+                    ),
+                    current=", ".join(group["sample_urls"]),
+                    suggested=(
+                        f"Google eliminó el rich result de {group['type']} en 2023 — agregar {missing} "
+                        "NO desbloquea ningún snippet de Google. Sigue siendo un schema válido que las IAs "
+                        "pueden usar para extraer la respuesta directamente, así que solo vale la pena "
+                        "completarlo con esa meta en mente, no por SEO clásico."
+                    ),
+                    effort="1h",
+                    impact=1,
+                )
+            )
+            continue
         issues.append(
             MagoIssue(
                 severity="high",

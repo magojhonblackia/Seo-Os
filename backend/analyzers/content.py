@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 
 from backend.analyzers.mago import MagoIssue
 
@@ -133,6 +134,151 @@ def build_content_issues(url: str, readability_score: float, eeat_score: int, si
         )
 
     return issues
+
+
+def build_answer_extractability_issues(url: str, metrics: dict) -> list[MagoIssue]:
+    """§ mejoras 2026-08-02, adaptado del módulo M11 de claude-seo-ai
+    (revisado y verificado en vivo contra jc antes de portarlo — ver README):
+    un encabezado en forma de pregunta sin una respuesta directa corta justo
+    después es contenido que un motor de IA (ChatGPT, Perplexity, AI
+    Overviews) no puede citar sin leer todo el artículo.
+
+    Deliberadamente conservador: solo se reportan los 2 hallazgos con
+    evidencia clara. NO se penaliza por faltar un TL;DR ni por estar fuera de
+    la banda ideal de 40-60 palabras — son matices de estilo, no defectos."""
+    issues: list[MagoIssue] = []
+    without_answer = metrics.get("question_headings_without_answer") or 0
+    question_count = metrics.get("question_headings_count") or 0
+
+    if without_answer > 0:
+        issues.append(
+            MagoIssue(
+                severity="medium",
+                category="ai_extractability",
+                title=(
+                    f"{url}: {without_answer} de {question_count} encabezado(s) de pregunta "
+                    "sin una respuesta directa justo después"
+                ),
+                page_url=url,
+                suggested=(
+                    "Un motor de IA no puede citar la respuesta si el párrafo siguiente al encabezado no la "
+                    "da directamente — evita frases de relleno tipo 'en este artículo veremos...' antes de "
+                    "responder la pregunta."
+                ),
+                effort="1h",
+                impact=2,
+            )
+        )
+
+    long_passages = metrics.get("long_passages_over_250w") or 0
+    if long_passages > 0:
+        issues.append(
+            MagoIssue(
+                severity="medium",
+                category="ai_extractability",
+                title=f"{url}: {long_passages} párrafo(s) de más de 250 palabras (difíciles de citar completos por una IA)",
+                page_url=url,
+                suggested=(
+                    "Divide los párrafos largos en bloques más cortos y autocontenidos — una IA cita "
+                    "pasajes, no artículos completos."
+                ),
+                effort="1h",
+                impact=1,
+            )
+        )
+
+    return issues
+
+
+def build_fact_density_issues(url: str, metrics: dict) -> list[MagoIssue]:
+    """§ mejoras 2026-08-02, adaptado del módulo M12 de claude-seo-ai
+    (verificado en vivo contra jc antes de portarlo — ver README).
+
+    Deliberadamente MUY conservador: de las 5 métricas que calcula
+    `_analyze_fact_density()`, solo `vague_authority_claims_count` genera una
+    issue. Las demás (densidad numérica, párrafos sin números, señal de
+    datos propios, enlaces a fuentes de autoridad) se muestran como dato en
+    el dashboard/reporte, pero NO se convierten en un "defecto" — un párrafo
+    de 30+ palabras sin ningún número es completamente normal en la mayoría
+    del contenido real (una explicación, una instrucción), así que generar
+    una issue por eso en cada página sería ruido, no una señal accionable."""
+    issues: list[MagoIssue] = []
+    vague_claims = metrics.get("vague_authority_claims_count") or 0
+
+    if vague_claims > 0:
+        issues.append(
+            MagoIssue(
+                severity="medium",
+                category="ai_extractability",
+                title=f"{url}: {vague_claims} afirmación(es) vaga(s) de autoridad sin fuente citada",
+                page_url=url,
+                suggested=(
+                    "Frases como 'el mejor', 'los expertos dicen' o 'todo el mundo sabe' sin un dato o "
+                    "fuente que las respalde no ayudan a que una IA cite tu contenido como confiable — "
+                    "reemplázalas por un número real o un enlace a una fuente verificable."
+                ),
+                effort="1h",
+                impact=1,
+            )
+        )
+
+    return issues
+
+
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _date_only(iso_value: str | None) -> str | None:
+    if not iso_value:
+        return None
+    match = _ISO_DATE_RE.match(iso_value)
+    return match.group(0) if match else None
+
+
+def _http_date_only(http_value: str | None) -> str | None:
+    if not http_value:
+        return None
+    try:
+        return parsedate_to_datetime(http_value).date().isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def build_freshness_issues(
+    url: str, schema_date_modified: str | None, http_last_modified: str | None
+) -> list[MagoIssue]:
+    """§ mejoras 2026-08-02, adaptado del módulo M13 de claude-seo-ai
+    (verificado en vivo contra jc antes de portarlo — ver README): cruza
+    `dateModified` del schema.org contra el header HTTP `Last-Modified` real
+    del servidor. Si no coinciden, el schema dice una fecha de actualización
+    que el servidor no respalda — una IA puede citar esa fecha como cierta.
+
+    Nunca sugiere "corregir" backdateando nada (regla P1) — solo señala la
+    inconsistencia para que el usuario decida cuál de las dos es la real."""
+    schema_date = _date_only(schema_date_modified)
+    http_date = _http_date_only(http_last_modified)
+
+    if not schema_date or not http_date or schema_date == http_date:
+        return []
+
+    return [
+        MagoIssue(
+            severity="medium",
+            category="freshness",
+            title=(
+                f"{url}: dateModified del schema ({schema_date}) no coincide con el "
+                f"header Last-Modified del servidor ({http_date})"
+            ),
+            page_url=url,
+            suggested=(
+                "El schema.org declara una fecha de actualización distinta a la que reporta el servidor. "
+                "Si el contenido de verdad cambió, actualiza ambas; si no cambió, no declares una fecha más "
+                "reciente que la real."
+            ),
+            effort="1h",
+            impact=2,
+        )
+    ]
 
 
 def detect_content_decay(

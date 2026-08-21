@@ -24,7 +24,15 @@ import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy import insert, select, update
 
-from backend.analyzers.content import EeatSignals, build_content_issues, calculate_eeat_score, flesch_huerta_score
+from backend.analyzers.content import (
+    EeatSignals,
+    build_answer_extractability_issues,
+    build_content_issues,
+    build_fact_density_issues,
+    build_freshness_issues,
+    calculate_eeat_score,
+    flesch_huerta_score,
+)
 from backend.analyzers.issue_store import reconcile_page_issues, record_issue
 from backend.analyzers.technical import PageData, analyze_page
 from backend.collectors import progress
@@ -67,12 +75,17 @@ class CrawledPage:
     x_robots_tag: str | None = None  # header HTTP crudo (§ X-Robots-Tag: puede contradecir el meta robots del HTML)
     content_encoding: str | None = None  # gzip/br/deflate — ausente = sin comprimir (§ cache/compression)
     cache_control: str | None = None  # ausente = el navegador aplica heurística RFC 7234, el mismo bug que tuvimos
+    http_last_modified: str | None = None  # § mejoras 2026-08-02: cruzar contra dateModified del schema
+    schema_date_published: str | None = None
+    schema_date_modified: str | None = None
     body_text_sample: str = ""  # primeros ~5000 chars, para legibilidad (§9 Fase 1)
     has_author: bool = False
     has_date: bool = False
     has_contact: bool = False
     local_business_schema: dict | None = None  # name/telephone del JSON-LD LocalBusiness (§9 Fase 4)
     schema_nodes: list[dict] = field(default_factory=list)  # {types, fields} para validar Rich Results (§ #5)
+    answer_extractability: dict = field(default_factory=dict)  # § mejoras 2026-08-02, ver _analyze_answer_extractability
+    fact_density: dict = field(default_factory=dict)  # § mejoras 2026-08-02, ver _analyze_fact_density
 
 
 def _same_domain(url: str, root_netloc: str) -> bool:
@@ -154,6 +167,38 @@ def _extract_schema_nodes(soup: BeautifulSoup) -> list[dict]:
                     }
                 )
     return nodes
+
+
+def _extract_schema_dates(soup: BeautifulSoup) -> tuple[str | None, str | None]:
+    """(datePublished, dateModified) tal cual vienen en el JSON-LD.
+
+    § mejoras 2026-08-02: EXCEPCIÓN deliberada a la regla de
+    `_extract_schema_nodes` (solo nombres de campo, nunca valores, ver su
+    docstring) — para detectar frescura hace falta el VALOR real de la
+    fecha, para cruzarlo contra el header HTTP Last-Modified real del
+    servidor. Sin el valor no hay nada que cruzar. Nunca se usa para
+    escribir/backdatear nada, solo para comparar (P1)."""
+    published: str | None = None
+    modified: str | None = None
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "{}")
+        except (json.JSONDecodeError, TypeError):
+            continue
+        candidates = data if isinstance(data, list) else [data]
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            graph = candidate.get("@graph")
+            raw_nodes = graph if isinstance(graph, list) else [candidate]
+            for node in raw_nodes:
+                if not isinstance(node, dict):
+                    continue
+                if published is None and isinstance(node.get("datePublished"), str):
+                    published = node["datePublished"]
+                if modified is None and isinstance(node.get("dateModified"), str):
+                    modified = node["dateModified"]
+    return published, modified
 
 
 def _extract_local_business_schema(soup: BeautifulSoup) -> dict | None:
@@ -263,6 +308,9 @@ def _extract_page_data(url: str, status_code: int, html: str) -> CrawledPage:
     has_author, has_date, has_contact = _detect_eeat_signals(soup, body_text, schema_types)
     local_business_schema = _extract_local_business_schema(soup)
     schema_nodes = _extract_schema_nodes(soup)
+    answer_extractability = _analyze_answer_extractability(soup)
+    fact_density = _analyze_fact_density(soup, url)
+    schema_date_published, schema_date_modified = _extract_schema_dates(soup)
 
     return CrawledPage(
         url=url,
@@ -287,6 +335,10 @@ def _extract_page_data(url: str, status_code: int, html: str) -> CrawledPage:
         has_contact=has_contact,
         local_business_schema=local_business_schema,
         schema_nodes=schema_nodes,
+        answer_extractability=answer_extractability,
+        fact_density=fact_density,
+        schema_date_published=schema_date_published,
+        schema_date_modified=schema_date_modified,
     )
 
 
@@ -324,6 +376,166 @@ def _detect_eeat_signals(soup: BeautifulSoup, body_text: str, schema_types: list
     )
 
     return has_author, has_date, has_contact
+
+
+# § mejoras 2026-08-02: extraíbilidad de respuestas por IA, adaptado del
+# módulo M11 del plugin claude-seo-ai (revisado en detalle antes de portar
+# nada — ver README). El original está en inglés (regex sobre "how/what/
+# why..."); estos patrones son una adaptación propia al español, sin
+# verificación previa contra datos reales en inglés, así que se probó en
+# vivo contra jcreparaciones.com antes de confiar en ella (ver README).
+_HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+
+# "Cómo cambiar/hacer/reparar..." (infinitivo) = título de guía instructiva,
+# no una pregunta que necesite una respuesta corta — mismo criterio que el
+# original excluye "How to X" en inglés.
+_HOWTO_TITLE_RE = re.compile(r"^¿?\s*c[oó]mo\s+\w+(ar|er|ir)\b", re.IGNORECASE)
+_QUESTION_START_RE = re.compile(
+    r"^¿?\s*(qué|que|cómo|como|por\s+qué|por\s+que|cuándo|cuando|dónde|donde|"
+    r"quién|quien|cuáles?|cuales?|cuánto[as]?|cuanto[as]?|puedo|puedes|puede|"
+    r"debo|debes|debe|es\s|son\s|hay\s)",
+    re.IGNORECASE,
+)
+# Frase de relleno antes de la respuesta real ("en este artículo veremos...")
+# — cuenta como "sin respuesta directa" aunque el párrafo no esté vacío.
+_WINDUP_RE = re.compile(
+    r"^(en (este|esta) (sección|artículo|guía|post|apartado)|vamos a (ver|explorar|hablar|revisar)|"
+    r"a continuación|te explicamos|en este blog|primero,)",
+    re.IGNORECASE,
+)
+_TLDR_RE = re.compile(r"\b(resumen|en resumen|en pocas palabras|puntos clave|lo esencial|tl;?dr)\b", re.IGNORECASE)
+
+
+def _looks_like_question_heading(text: str) -> bool:
+    """Bug real encontrado verificando en vivo contra jc: "¿Cómo saber si la
+    batería está degradada?" es una pregunta real (termina en "?") pero
+    "saber" también es infinitivo, así que la exclusión de título-guía la
+    descartaba antes de mirar el signo de pregunta. El "?" final es la señal
+    más fuerte — debe ganarle a la heurística de título-guía, no al revés."""
+    text = text.strip()
+    if not text:
+        return False
+    if text.endswith("?"):
+        return True
+    if _HOWTO_TITLE_RE.match(text):
+        return False
+    return bool(_QUESTION_START_RE.match(text))
+
+
+def _first_paragraph_after(heading_tag) -> str:
+    """Primer <p>/<li> con texto real después de este heading, antes del
+    siguiente heading — es lo que un motor de IA leería como "la respuesta"."""
+    for sib in heading_tag.find_all_next():
+        if sib.name in _HEADING_TAGS:
+            break
+        if sib.name in ("p", "li"):
+            text = sib.get_text(separator=" ", strip=True)
+            if text:
+                return text
+    return ""
+
+
+def _analyze_answer_extractability(soup: BeautifulSoup) -> dict:
+    """Cuenta encabezados en forma de pregunta con/sin una respuesta directa
+    corta justo después (banda ideal 40-60 palabras, igual que el original) —
+    eso es lo que un motor de IA puede citar sin tener que leer todo el
+    artículo. Heurística determinística sobre texto, no usa IA para juzgar."""
+    headings = [h for h in soup.find_all(_HEADING_TAGS) if h.get_text(strip=True)]
+
+    question_count = 0
+    without_answer = 0
+    in_target_band = 0
+    for h in headings:
+        if not _looks_like_question_heading(h.get_text(separator=" ", strip=True)):
+            continue
+        question_count += 1
+        answer = _first_paragraph_after(h)
+        word_count = len(answer.split())
+        has_direct_answer = word_count > 0 and not _WINDUP_RE.match(answer)
+        if not has_direct_answer:
+            without_answer += 1
+        if 40 <= word_count <= 60:
+            in_target_band += 1
+
+    paragraphs = [
+        p.get_text(separator=" ", strip=True) for p in soup.find_all(("p", "li"))
+    ]
+    long_passages = sum(1 for p in paragraphs if len(p.split()) > 250)
+
+    body_sample = soup.get_text(separator=" ", strip=True)[:4000]
+    has_tldr = bool(_TLDR_RE.search(body_sample)) or any(_TLDR_RE.search(h.get_text()) for h in headings)
+
+    return {
+        "question_headings_count": question_count,
+        "question_headings_without_answer": without_answer,
+        "answers_in_target_band": in_target_band,
+        "long_passages_over_250w": long_passages,
+        "has_tldr_or_summary": has_tldr,
+    }
+
+
+# § mejoras 2026-08-02: densidad de datos/hechos, adaptado del módulo M12 de
+# claude-seo-ai (mismo criterio que M11: adaptación propia al español,
+# verificada en vivo contra jcreparaciones.com antes de confiar en ella).
+_NUMERIC_RE = re.compile(
+    r"\b\d+([.,]\d+)?\s?(%|por\s?ciento|x|mil|millones?)?\b|\$\s?\d|\b(19|20)\d{2}\b",
+    re.IGNORECASE,
+)
+_ORIGINAL_DATA_RE = re.compile(
+    r"\b(nuestr[oa]s?\s+(estudio|encuesta|datos|investigaci[oó]n|an[aá]lisis|prueba|experimento)|"
+    r"analizamos|encuestamos|probamos|medimos|encontramos que|datos (propios|internos)|"
+    r"en nuestra (prueba|encuesta))\b",
+    re.IGNORECASE,
+)
+_SUPERLATIVE_RE = re.compile(
+    r"\b(el\s+(mejor|m[aá]s\s+r[aá]pido|m[aá]s\s+grande|n[uú]mero\s+uno|l[ií]der)|#1|"
+    r"m[aá]s\s+barato|(los\s+)?estudios\s+(demuestran|muestran)|"
+    r"expertos\s+(coinciden|dicen|aseguran)|todo\s+el\s+mundo\s+sabe)\b",
+    re.IGNORECASE,
+)
+_AUTHORITY_HOST_RE = re.compile(
+    r"(\.gov(\.\w+)?|\.edu(\.\w+)?|\.gob\.\w+|wikipedia\.org|nature\.com|sciencedirect|"
+    r"nih\.gov|who\.int|oecd\.org|arxiv\.org|w3\.org|schema\.org)",
+    re.IGNORECASE,
+)
+
+
+def _analyze_fact_density(soup: BeautifulSoup, page_url: str) -> dict:
+    """Cuenta párrafos largos (≥30 palabras) sin ningún número/estadística
+    (afirmaciones que suenan vagas), frases de autoridad vaga sin fuente
+    ("los expertos dicen"), señal de datos propios/originales, y enlaces
+    salientes a fuentes de autoridad (.gov/.edu/wikipedia). Solo cuenta —
+    juzgar si una afirmación "necesita" fuente es criterio humano, nunca se
+    inventa una estadística o fuente para "mejorar" el conteo."""
+    paragraphs = [
+        p.get_text(separator=" ", strip=True) for p in soup.find_all(("p", "li"))
+    ]
+    paragraphs = [p for p in paragraphs if len(p.split()) >= 8]
+    text = " ".join(paragraphs)
+    total_words = len(text.split())
+    numeric_tokens = len(_NUMERIC_RE.findall(text))
+
+    passages_without_numbers = sum(
+        1 for p in paragraphs if len(p.split()) >= 30 and not _NUMERIC_RE.search(p)
+    )
+
+    root_netloc = urlparse(page_url).netloc
+    authority_links = 0
+    for a in soup.find_all("a", href=True):
+        absolute = urljoin(page_url, a["href"])
+        parsed = urlparse(absolute)
+        if parsed.scheme not in ("http", "https") or _same_domain(absolute, root_netloc):
+            continue
+        if _AUTHORITY_HOST_RE.search(parsed.netloc):
+            authority_links += 1
+
+    return {
+        "numeric_density_per_100w": round(100 * numeric_tokens / total_words, 2) if total_words else 0.0,
+        "passages_30w_plus_without_numbers": passages_without_numbers,
+        "original_data_signal": bool(_ORIGINAL_DATA_RE.search(text)),
+        "vague_authority_claims_count": len(_SUPERLATIVE_RE.findall(text)),
+        "authoritative_outbound_links": authority_links,
+    }
 
 
 def _load_robots(start_url: str) -> RobotFileParser:
@@ -411,6 +623,7 @@ def crawl_site(
                 page.x_robots_tag = response.headers.get("x-robots-tag")
                 page.content_encoding = response.headers.get("content-encoding")
                 page.cache_control = response.headers.get("cache-control")
+                page.http_last_modified = response.headers.get("last-modified")
             except httpx.HTTPError as exc:
                 errors.append(f"{url}: {exc}")
                 logger.warning("Error crawleando %s: %s", url, exc)
@@ -501,6 +714,13 @@ class TechnicalCrawler(BaseCollector):
                 )
                 eeat_score, _eeat_breakdown = calculate_eeat_score(eeat_signals)
                 content_issues = build_content_issues(raw["url"], readability_score, eeat_score, eeat_signals)
+                answer_extractability = raw.get("answer_extractability") or {}
+                content_issues += build_answer_extractability_issues(raw["url"], answer_extractability)
+                fact_density = raw.get("fact_density") or {}
+                content_issues += build_fact_density_issues(raw["url"], fact_density)
+                content_issues += build_freshness_issues(
+                    raw["url"], raw.get("schema_date_modified"), raw.get("http_last_modified")
+                )
 
                 existing = conn.execute(
                     select(pages.c.id).where(
@@ -530,6 +750,19 @@ class TechnicalCrawler(BaseCollector):
                     "has_author": eeat_signals.has_author,
                     "has_date": eeat_signals.has_date,
                     "has_contact": eeat_signals.has_contact,
+                    "question_headings_count": answer_extractability.get("question_headings_count"),
+                    "question_headings_without_answer": answer_extractability.get("question_headings_without_answer"),
+                    "answers_in_target_band": answer_extractability.get("answers_in_target_band"),
+                    "long_passages_over_250w": answer_extractability.get("long_passages_over_250w"),
+                    "has_tldr_or_summary": answer_extractability.get("has_tldr_or_summary"),
+                    "numeric_density_per_100w": fact_density.get("numeric_density_per_100w"),
+                    "passages_30w_plus_without_numbers": fact_density.get("passages_30w_plus_without_numbers"),
+                    "original_data_signal": fact_density.get("original_data_signal"),
+                    "vague_authority_claims_count": fact_density.get("vague_authority_claims_count"),
+                    "authoritative_outbound_links": fact_density.get("authoritative_outbound_links"),
+                    "http_last_modified": raw.get("http_last_modified"),
+                    "schema_date_published": raw.get("schema_date_published"),
+                    "schema_date_modified": raw.get("schema_date_modified"),
                 }
                 if existing:
                     page_id = existing[0]

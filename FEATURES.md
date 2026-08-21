@@ -125,8 +125,19 @@ citado en respuestas de IA.
 publicación/actualización visible, autoría), y detección de caída de
 tráfico real (compara el promedio de clics entre la primera y segunda mitad
 del histórico disponible — necesita ≥60 días cargados o avisa que no
-alcanza).
+alcanza). Desde 2026-08-02 (adaptado del plugin claude-seo-ai, ver README),
+también: **extraíbilidad de respuestas por IA** (encabezados en forma de
+pregunta con/sin una respuesta directa de 40-60 palabras justo después —
+lo que un motor de IA puede citar sin leer todo el artículo), **densidad de
+datos/hechos** (párrafos sin ningún número, frases de autoridad vaga sin
+fuente, señal de datos propios, enlaces a fuentes de autoridad real), y
+**frescura real** (cruza `dateModified` del schema contra el header HTTP
+`Last-Modified` del servidor — detecta cuando el schema miente sobre cuándo
+se actualizó algo).
 **Cómo**: `analyzers/content.py`, sobre datos ya crawleados + `gsc_daily`.
+La extracción (headings/párrafos/fechas del HTML) vive en
+`collectors/crawler.py` (mismo patrón que E-E-A-T: extracción en el
+crawler, scoring/issues en el analyzer).
 
 ### 🧩 Duplicados y thin content
 **Qué hace**: detecta títulos/meta descriptions duplicados entre páginas y

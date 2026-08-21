@@ -1,11 +1,16 @@
 """Tests de collectors: parseo con HTML grabado, SIN llamadas a internet (regla QA)."""
 from pathlib import Path
 
+from bs4 import BeautifulSoup
 from sqlalchemy import insert, select
 
 from backend.analyzers.issue_store import reconcile_page_issues, reconcile_project_issues
 from backend.collectors.base import BaseCollector, CollectorResult
-from backend.collectors.crawler import _extract_page_data, _normalize_url
+from backend.collectors.crawler import (
+    _extract_page_data,
+    _looks_like_question_heading,
+    _normalize_url,
+)
 from backend.db.database import get_connection, now_iso
 from backend.db.schema import issues, pages, projects, snapshots
 
@@ -14,6 +19,10 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def _load(name: str) -> str:
     return (FIXTURES / name).read_text()
+
+
+def _soup(html: str) -> BeautifulSoup:
+    return BeautifulSoup(html, "lxml")
 
 
 class _ExplodingCollector(BaseCollector):
@@ -329,3 +338,168 @@ def test_extract_page_data_incluye_body_text_sample():
     html = _load("sample_page.html")
     page = _extract_page_data("https://jcreparaciones.com/reparacion-iphone-cali", 200, html)
     assert "servicio técnico especializado" in page.body_text_sample.lower()
+
+
+# ---------- Extraíbilidad de respuestas por IA (§ mejoras 2026-08-02) ----------
+
+def test_looks_like_question_heading_reconoce_preguntas_reales_en_español():
+    assert _looks_like_question_heading("¿Cuánto cuesta cambiar la pantalla?")
+    assert _looks_like_question_heading("¿Hacen envíos a otras ciudades?")
+    assert _looks_like_question_heading("Cuánto dura la batería de un iPhone")  # sin ¿, empieza con interrogativo
+
+
+def test_looks_like_question_heading_excluye_titulos_de_guia_sin_signo_de_pregunta():
+    """'Cómo + infinitivo' sin '?' es un título de guía instructiva ('Cómo
+    cambiar la batería'), no una pregunta que necesite una respuesta corta."""
+    assert not _looks_like_question_heading("Cómo cuidar tu celular para que dure más")
+    assert not _looks_like_question_heading("Cómo revisar el estado de la batería en tu iPhone")
+    assert not _looks_like_question_heading("Servicios")
+    assert not _looks_like_question_heading("")
+
+
+def test_looks_like_question_heading_el_signo_de_pregunta_le_gana_al_titulo_de_guia():
+    """Bug real encontrado verificando en vivo contra jcreparaciones.com:
+    '¿Cómo saber si la batería está degradada?' es una pregunta real (termina
+    en '?') pero 'saber' también es infinitivo — la exclusión de título-guía
+    la descartaba antes de mirar el signo de pregunta. El '?' final debe
+    ganarle siempre a esa heurística, nunca al revés."""
+    assert _looks_like_question_heading("¿Cómo saber si la batería del iPhone está degradada?")
+
+
+def test_analyze_answer_extractability_caso_real():
+    html = _load("answer_extractability_page.html")
+    page = _extract_page_data("https://x.com/preguntas", 200, html)
+    ae = page.answer_extractability
+
+    # 3 encabezados de pregunta real: cambio de pantalla, envíos, por qué elegirnos.
+    # "Cómo cuidar tu celular..." y "Servicios" correctamente excluidos.
+    assert ae["question_headings_count"] == 3
+    # "¿Hacen envíos...?" va seguida de una <img>, no de un <p>/<li> con texto —
+    # sin respuesta directa que una IA pueda citar.
+    assert ae["question_headings_without_answer"] == 1
+    assert ae["long_passages_over_250w"] == 0
+    assert ae["has_tldr_or_summary"] is False
+
+
+def test_build_answer_extractability_issues_solo_reporta_lo_que_tiene_evidencia_clara():
+    from backend.analyzers.content import build_answer_extractability_issues
+
+    # Todo bien: no genera ninguna issue.
+    limpio = {
+        "question_headings_count": 5, "question_headings_without_answer": 0,
+        "answers_in_target_band": 3, "long_passages_over_250w": 0, "has_tldr_or_summary": False,
+    }
+    assert build_answer_extractability_issues("https://x.com/a", limpio) == []
+
+    # Con huecos reales: sí genera, con el conteo exacto en el título.
+    con_huecos = {
+        "question_headings_count": 5, "question_headings_without_answer": 2,
+        "answers_in_target_band": 1, "long_passages_over_250w": 1, "has_tldr_or_summary": False,
+    }
+    issues = build_answer_extractability_issues("https://x.com/b", con_huecos)
+    assert len(issues) == 2
+    assert all(i.category == "ai_extractability" for i in issues)
+    assert "2 de 5" in issues[0].title
+
+
+# ---------- Densidad de datos/hechos (§ mejoras 2026-08-02) ----------
+
+def test_analyze_fact_density_detecta_numeros_datos_propios_y_claims_vagos():
+    from backend.collectors.crawler import _analyze_fact_density
+
+    html = """
+    <html><body>
+      <p>El cambio de pantalla cuesta $150.000 y toma aproximadamente 2 horas en total.</p>
+      <p>Somos el mejor taller de reparación en toda la ciudad, sin ninguna duda posible.</p>
+      <p>En nuestra encuesta encontramos que el 80% de los clientes vuelve a repararse con nosotros.</p>
+      <a href="https://es.wikipedia.org/wiki/IPhone">Wikipedia</a>
+      <a href="https://instagram.com/jc">Instagram</a>
+    </body></html>
+    """
+    soup_result = _analyze_fact_density(_soup(html), "https://jcreparaciones.com/pagina")
+    assert soup_result["vague_authority_claims_count"] == 1  # "el mejor... sin ninguna duda"
+    assert soup_result["original_data_signal"] is True  # "en nuestra encuesta encontramos que"
+    assert soup_result["authoritative_outbound_links"] == 1  # solo wikipedia, no instagram
+    assert soup_result["numeric_density_per_100w"] > 0
+
+
+def test_build_fact_density_issues_solo_reporta_claims_vagos():
+    """§ Deliberadamente conservador: de las 5 métricas, solo
+    vague_authority_claims_count genera una issue — las demás son datos, no
+    defectos (ver docstring de build_fact_density_issues)."""
+    from backend.analyzers.content import build_fact_density_issues
+
+    sin_defectos = {
+        "numeric_density_per_100w": 0.0, "passages_30w_plus_without_numbers": 5,
+        "original_data_signal": False, "vague_authority_claims_count": 0, "authoritative_outbound_links": 0,
+    }
+    assert build_fact_density_issues("https://x.com/a", sin_defectos) == []
+
+    con_claims_vagos = {**sin_defectos, "vague_authority_claims_count": 2}
+    issues = build_fact_density_issues("https://x.com/b", con_claims_vagos)
+    assert len(issues) == 1
+    assert issues[0].category == "ai_extractability"
+    assert "2 afirmación" in issues[0].title
+
+
+# ---------- Frescura real: schema vs header HTTP (§ mejoras 2026-08-02) ----------
+
+def test_extract_schema_dates_caso_real_jc():
+    """Reproduce el caso real verificado en vivo contra
+    jcreparaciones.com/reparar-vs-comprar-celular-2026: datePublished y
+    dateModified reales en el JSON-LD, ambos 2026-06-02."""
+    from backend.collectors.crawler import _extract_schema_dates
+
+    html = """
+    <html><body>
+      <script type="application/ld+json">
+      {"@type": "Article", "headline": "Reparar vs comprar",
+       "datePublished": "2026-06-02", "dateModified": "2026-06-02"}
+      </script>
+    </body></html>
+    """
+    published, modified = _extract_schema_dates(_soup(html))
+    assert published == "2026-06-02"
+    assert modified == "2026-06-02"
+
+
+def test_extract_schema_dates_sin_jsonld_devuelve_none():
+    from backend.collectors.crawler import _extract_schema_dates
+
+    published, modified = _extract_schema_dates(_soup("<html><body><p>sin schema</p></body></html>"))
+    assert (published, modified) == (None, None)
+
+
+def test_build_freshness_issues_detecta_mismatch_real():
+    from backend.analyzers.content import build_freshness_issues
+
+    # Schema dice "actualizado hoy", el servidor dice que no cambió en meses.
+    issues = build_freshness_issues(
+        "https://x.com/articulo",
+        schema_date_modified="2026-08-20",
+        http_last_modified="Mon, 02 Jun 2026 10:00:00 GMT",
+    )
+    assert len(issues) == 1
+    assert issues[0].category == "freshness"
+    assert "2026-08-20" in issues[0].title and "2026-06-02" in issues[0].title
+
+
+def test_build_freshness_issues_no_reporta_si_coinciden():
+    from backend.analyzers.content import build_freshness_issues
+
+    issues = build_freshness_issues(
+        "https://x.com/articulo",
+        schema_date_modified="2026-06-02T10:00:00-05:00",
+        http_last_modified="Tue, 02 Jun 2026 15:00:00 GMT",
+    )
+    assert issues == []
+
+
+def test_build_freshness_issues_no_reporta_si_falta_cualquiera_de_los_dos():
+    """Caso real de jc: el sitio (Next.js/Vercel) no manda header
+    Last-Modified — sin ambas señales no hay nada que cruzar, no se opina."""
+    from backend.analyzers.content import build_freshness_issues
+
+    assert build_freshness_issues("https://x.com/a", "2026-06-02", None) == []
+    assert build_freshness_issues("https://x.com/a", None, "Tue, 02 Jun 2026 15:00:00 GMT") == []
+    assert build_freshness_issues("https://x.com/a", None, None) == []

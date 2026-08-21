@@ -803,6 +803,77 @@ ese proyecto no tiene `GA4_PROPERTY_ID` configurado.
 
 Suite: 598 tests.
 
+### 4 capacidades nuevas revisando el plugin claude-seo-ai (2026-08-02)
+
+El usuario instaló el plugin de Claude Code `claude-seo-ai` (invocado como
+`/seo audit <url>`) y pidió revisarlo para mejorar SEO-OS. En vez de solo leer
+las descripciones de sus ~20 módulos, se leyó el código fuente real (skills,
+agentes, y sobre todo los scripts `.mjs` con la lógica determinística) para
+encontrar algo genuinamente portable, no solo inspiración. Se encontraron y
+portaron 4 cosas, cada una verificada en vivo contra jcreparaciones.com antes
+de confiar en ella — regla de siempre en este proyecto, aplicada también a
+código que no se escribió originalmente aquí.
+
+**1. Bug real, no mejora — FAQPage/HowTo ya no dan rich result.** Google
+eliminó el rich result de FAQPage y HowTo en agosto 2023. `schema_validation.py`
+seguía diciendo "sin `mainEntity` Google NO muestra el rich snippet" — una
+afirmación falsa desde 2023, sin importar qué tan completo esté el schema.
+Verificado contra jc: 93 páginas reales con FAQPage. Fix: nuevo
+`DEPRECATED_RICH_RESULT_TYPES`, severidad bajada de `high` a `medium`, mensaje
+corregido (sigue siendo útil para que una IA extraiga la respuesta, pero no
+hay snippet de Google que desbloquear).
+
+**2. Extraíbilidad de respuestas por IA** (adaptado del módulo M11). Detecta
+encabezados en forma de pregunta y si el párrafo siguiente da una respuesta
+directa (no un "en este artículo veremos..." de relleno) en la banda ideal de
+40-60 palabras — eso es lo que un motor de IA puede citar sin leer todo el
+artículo. El original usa regex en inglés ("how/what/why..."); se adaptó a
+español desde cero, no es una traducción literal. **Bug real encontrado en la
+propia adaptación**, antes de confiar en ella: "¿Cómo saber si la batería del
+iPhone está degradada?" es una pregunta real (termina en "?") pero "saber" es
+infinitivo, así que la exclusión de título-guía ("Cómo cambiar la batería" =
+guía, no pregunta) la descartaba antes de mirar el signo de pregunta. Fix: el
+"?" final siempre gana. Verificado en vivo contra
+`jcreparaciones.com/cuanto-dura-bateria-iphone`: 10 preguntas reales
+detectadas, respuestas extraídas correctamente (ej. "¿Cuánto cuesta cambiar
+la batería?" → "$150.000-$220.000... toma 1 hora..." — respuesta real, no
+inventada). También detectó un hueco real en `celular-mojado-cali`: "QUÉ
+HACER CUANDO TU CELULAR SE MOJA" sin ningún párrafo después.
+
+**3. Densidad de datos/hechos** (adaptado del módulo M12). Cuenta párrafos
+largos sin ningún número (afirmaciones vagas), frases de autoridad sin fuente
+("el mejor", "los expertos dicen"), señal de datos propios ("en nuestra
+encuesta encontramos que"), y enlaces salientes a fuentes de autoridad real
+(.gov/.edu/wikipedia). Deliberadamente conservador: de las 5 métricas, solo
+"afirmación vaga sin fuente" genera una issue — las demás son dato, no
+defecto (un párrafo sin números es normal en la mayoría del contenido real).
+Verificado en vivo: jc no usa lenguaje superlativo vago (0 en todas las
+páginas, confirmado que el regex sí funciona con casos sintéticos), y sí tiene
+una señal real de datos propios en `/blog` ("Analizamos si conviene comprarla
+o esperar").
+
+**4. Frescura real: schema vs header HTTP** (adaptado del módulo M13). Cruza
+`dateModified` del schema.org contra el header HTTP `Last-Modified` real del
+servidor — detecta cuando el schema dice "actualizado hace poco" pero el
+servidor no cambió nada en meses. Requirió una excepción deliberada y
+documentada a la regla de `schema_validation.py` de "solo nombres de campo,
+nunca valores": para cruzar fechas hace falta el valor real. **Limitación real
+descubierta verificando esto contra jc**: su sitio (Next.js/Vercel) no manda
+header `Last-Modified` en absoluto — común en sitios modernos con SSR/edge
+cache. Sin ambas señales no hay nada que cruzar, así que en jc esto
+correctamente no genera ninguna issue (verificado que la extracción de fechas
+del schema SÍ funciona con datos reales en páginas de blog: `datePublished`/
+`dateModified` = "2026-06-02" extraídos correctamente). El camino de detectar
+un mismatch real se probó con datos sintéticos en los tests, no fue posible
+contra jc por esta limitación real de su stack.
+
+Los 4 hallazgos (y otros que no se implementaron todavía: score dual
+Search-SEO/AI-Visibility sin mezclar, severity gating con tope duro a F,
+detección de sitios JS-only sin renderizar) están documentados para
+retomarlos si se decide seguir por ahí.
+
+Suite: 611 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

@@ -70,6 +70,22 @@ _PAGES_COLUMNS_FASE1 = {
     "has_contact": "BOOLEAN",
     "x_robots_tag": "TEXT",  # § herramientas de mercado 2026-07-24
     "redirected_to": "TEXT",  # § bug real 2026-07-24: acumular cobertura de redirects entre crawls
+    # § mejoras 2026-08-02: extraíbilidad de respuestas por IA (ver schema.py)
+    "question_headings_count": "INTEGER",
+    "question_headings_without_answer": "INTEGER",
+    "answers_in_target_band": "INTEGER",
+    "long_passages_over_250w": "INTEGER",
+    "has_tldr_or_summary": "BOOLEAN",
+    # § mejoras 2026-08-02: densidad de datos/hechos (ver schema.py)
+    "numeric_density_per_100w": "REAL",
+    "passages_30w_plus_without_numbers": "INTEGER",
+    "original_data_signal": "BOOLEAN",
+    "vague_authority_claims_count": "INTEGER",
+    "authoritative_outbound_links": "INTEGER",
+    # § mejoras 2026-08-02: frescura real (ver schema.py)
+    "http_last_modified": "TEXT",
+    "schema_date_published": "TEXT",
+    "schema_date_modified": "TEXT",
 }
 
 
