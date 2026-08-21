@@ -720,6 +720,20 @@ def get_content(project: dict = Depends(get_project_or_404)) -> dict:
             "has_author": p.has_author,
             "has_date": p.has_date,
             "has_contact": p.has_contact,
+            # § mejoras 2026-08-02: extraíbilidad de respuestas + densidad de
+            # datos/hechos + frescura (adaptado de claude-seo-ai, ver README)
+            "question_headings_count": p.question_headings_count,
+            "question_headings_without_answer": p.question_headings_without_answer,
+            "answers_in_target_band": p.answers_in_target_band,
+            "long_passages_over_250w": p.long_passages_over_250w,
+            "has_tldr_or_summary": p.has_tldr_or_summary,
+            "numeric_density_per_100w": p.numeric_density_per_100w,
+            "passages_30w_plus_without_numbers": p.passages_30w_plus_without_numbers,
+            "original_data_signal": p.original_data_signal,
+            "vague_authority_claims_count": p.vague_authority_claims_count,
+            "authoritative_outbound_links": p.authoritative_outbound_links,
+            "schema_date_modified": p.schema_date_modified,
+            "http_last_modified": p.http_last_modified,
         }
         for p in page_rows
     ]

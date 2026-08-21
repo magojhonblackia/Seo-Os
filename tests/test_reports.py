@@ -458,3 +458,38 @@ async def test_reporte_incluye_ga4_contenido_preguntas_y_competidores():
     assert "reporte-test.com/legible-baja" in html            # página real
     assert "por que mi celular no prende" in html             # pregunta real
     assert "competidor-real.com" in html and "12" in html     # competidor real
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_extractabilidad_y_densidad_de_datos():
+    """Regresión real 2026-08-02: el usuario preguntó si el reporte ya
+    registraba lo nuevo (M11/M12/M13, ver README) — las ISSUES de esos
+    módulos ya salían en el Action Plan, pero el dato crudo por página
+    (cuántas preguntas, densidad numérica, frescura) no tenía sección propia,
+    a diferencia de Contenido/E-E-A-T que sí la tiene."""
+    project = _make_project("test-report-extractabilidad")
+    with get_connection() as conn:
+        conn.execute(
+            insert(pages).values(
+                project_id=project["id"], url="https://reporte-test.com/preguntas",
+                first_seen=now_iso(), word_count=800,
+                question_headings_count=5, question_headings_without_answer=2,
+                answers_in_target_band=1, long_passages_over_250w=1, has_tldr_or_summary=False,
+                numeric_density_per_100w=4.5, passages_30w_plus_without_numbers=2,
+                original_data_signal=True, vague_authority_claims_count=1,
+                authoritative_outbound_links=3,
+                schema_date_modified="2026-08-01", http_last_modified="Mon, 01 Aug 2026 10:00:00 GMT",
+            )
+        )
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-extractabilidad"))
+
+    section_idx = html.find("Extraíbilidad por IA y densidad de datos")
+    assert section_idx != -1
+    idx = html.find("reporte-test.com/preguntas", section_idx)
+    assert idx != -1
+    row = html[idx:idx + 400]
+    assert "5 (2)" in row       # 5 preguntas, 2 sin respuesta
+    assert "4.5" in row         # densidad numérica
+    assert "✅ coincide" in row  # schema y header coinciden (mismo 2026-08-01)

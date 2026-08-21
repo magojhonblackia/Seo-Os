@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import desc, select
 
+from backend.analyzers.content import _date_only, _http_date_only
 from backend.analyzers.opportunities import SCORE_KINDS_LABELS as _SCORE_KINDS_LABELS
 from backend.api.routes_dashboard import (
     get_action_plan,
@@ -698,6 +699,49 @@ async def generate_html_report(project: dict) -> str:
             + "</tbody></table>"
         )
 
+    # ---------- Extraíbilidad de respuestas + densidad de datos (§ 2026-08-02,
+    # adaptado de claude-seo-ai — ver README). El dato crudo por página, no
+    # solo las issues que ya salen en el Action Plan cuando hay un problema
+    # real: aquí se ve el conteo completo, incluyendo lo que SÍ está bien. ----------
+    if content_data.get("empty_reason") or not content_pages:
+        ai_extractability_block = f'<p class="muted">{_esc(content_data.get("empty_reason") or "Sin páginas crawleadas todavía.")}</p>'
+    else:
+        def _freshness_cell(p: dict) -> str:
+            schema_date = _date_only(p.get("schema_date_modified"))
+            http_date = _http_date_only(p.get("http_last_modified"))
+            if not schema_date or not http_date:
+                return '<span class="muted">—</span>'
+            return "✅ coincide" if schema_date == http_date else "⚠️ no coincide"
+
+        total_questions = sum(p.get("question_headings_count") or 0 for p in content_pages)
+        total_without_answer = sum(p.get("question_headings_without_answer") or 0 for p in content_pages)
+        total_vague_claims = sum(p.get("vague_authority_claims_count") or 0 for p in content_pages)
+        pages_with_original_data = sum(1 for p in content_pages if p.get("original_data_signal"))
+
+        ai_extractability_block = (
+            f'<p>De {total_questions} encabezado(s) de pregunta detectados en todo el sitio, '
+            f'<strong>{total_without_answer}</strong> no tienen una respuesta directa justo después. '
+            f'<strong>{total_vague_claims}</strong> afirmación(es) vaga(s) de autoridad sin fuente citada. '
+            f'{pages_with_original_data} página(s) con señal de datos/análisis propios.</p>'
+            "<table><thead><tr><th>Página</th><th>Preguntas (sin respuesta)</th><th>Párrafos &gt;250 palabras</th>"
+            "<th>Densidad numérica /100p</th><th>Afirmaciones vagas</th><th>Enlaces a fuentes de autoridad</th>"
+            "<th>Frescura (schema vs servidor)</th></tr></thead><tbody>"
+            + "".join(
+                f'<tr><td>{_esc(p["url"])}</td>'
+                f'<td>{p.get("question_headings_count") or 0} ({p.get("question_headings_without_answer") or 0})</td>'
+                f'<td>{p.get("long_passages_over_250w") or 0}</td>'
+                f'<td>{p.get("numeric_density_per_100w") if p.get("numeric_density_per_100w") is not None else "—"}</td>'
+                f'<td>{p.get("vague_authority_claims_count") or 0}</td>'
+                f'<td>{p.get("authoritative_outbound_links") or 0}</td>'
+                f'<td>{_freshness_cell(p)}</td></tr>'
+                for p in content_pages
+            )
+            + "</tbody></table>"
+            '<p class="muted" style="margin-top:8px;">"Frescura" solo compara cuando AMBAS fechas existen '
+            "(schema dateModified y header HTTP Last-Modified) — muchos sitios modernos (Next.js/Vercel y "
+            "similares) no mandan ese header, así que la mayoría mostrará \"—\", no es un defecto.</p>"
+        )
+
     # ---------- Preguntas reales de Google (§ 2026-08-02, faltaba en el reporte) ----------
     question_rows = question_ideas.get("ideas") or []
     if not question_rows:
@@ -883,6 +927,9 @@ async def generate_html_report(project: dict) -> str:
 
   <h2>📝 Contenido y E-E-A-T por página</h2>
   {content_block}
+
+  <h2>🧠 Extraíbilidad por IA y densidad de datos</h2>
+  {ai_extractability_block}
 
   <h2>⚡ Core Web Vitals por página (PageSpeed Insights real)</h2>
   {cwv_block}

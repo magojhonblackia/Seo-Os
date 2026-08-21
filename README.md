@@ -874,6 +874,25 @@ retomarlos si se decide seguir por ahí.
 
 Suite: 611 tests.
 
+### El dato crudo de M11/M12/M13 tampoco tenía sección propia en el reporte (2026-08-02)
+
+El usuario preguntó, tras portar las 4 mejoras de arriba: "¿ya registra lo
+nuevo el reporte?". Verificado: parcial. Las ISSUES de extraíbilidad/densidad
+de datos SÍ salían en el Action Plan (cuando hay un problema real), pero el
+dato crudo por página (cuántas preguntas tiene cada una, densidad numérica,
+frescura) no tenía su propia sección — a diferencia de Contenido/E-E-A-T, que
+sí muestra el número aunque no sea un problema.
+
+Se agregó `🧠 Extraíbilidad por IA y densidad de datos` al reporte y a
+`GET /api/dashboard/{slug}/content` (misma fuente para dashboard y reporte,
+mismo criterio de siempre). Muestra agregados del sitio (preguntas totales
+sin respuesta, afirmaciones vagas totales) y una tabla por página. La columna
+de frescura compara schema vs header HTTP solo cuando AMBOS existen — el
+reporte lo explica explícitamente para que "—" en la mayoría de las filas de
+jc no se lea como un defecto (su stack Next.js/Vercel no manda ese header).
+
+Suite: 612 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían
