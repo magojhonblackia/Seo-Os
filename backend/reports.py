@@ -30,6 +30,7 @@ from backend.api.routes_dashboard import (
     get_action_plan,
     get_ai_visibility,
     get_backlinks,
+    get_toxic_backlinks,
     get_competitors,
     get_competitor_detail,
     get_content,
@@ -222,6 +223,7 @@ async def generate_html_report(project: dict) -> str:
     ai_visibility = get_ai_visibility(project)
     local = get_local_seo(project)
     backlinks_data = get_backlinks(project)
+    toxic_backlinks_data = get_toxic_backlinks(project)
     keywords_data = get_keywords(project)
     keyword_ideas = get_keyword_ideas(project)
     local_pack = get_local_pack(project)
@@ -465,6 +467,31 @@ async def generate_html_report(project: dict) -> str:
             f'{backlinks_data["toxic_count"]} marcados como tóxicos.</p>'
         )
     )
+
+    # ---------- Backlinks tóxicos por patrón (§ mejoras 2026-08-26) ----------
+    if not toxic_backlinks_data.get("available"):
+        toxic_backlinks_block = f'<p class="muted">{_esc(toxic_backlinks_data.get("reason") or "Sin backlinks suficientes todavía.")}</p>'
+    else:
+        flagged = toxic_backlinks_data.get("verdicts") or []
+        toxic_backlinks_block = (
+            f'<p><strong>{toxic_backlinks_data["toxic_pct"]}%</strong> tóxico sobre '
+            f'{toxic_backlinks_data["total_backlinks"]} backlinks — '
+            f'{toxic_backlinks_data["toxic_count"]} tóxico(s), {toxic_backlinks_data["review_count"]} a revisar, '
+            f'{toxic_backlinks_data["clean_count"]} limpio(s). Clasificación por patrón determinístico '
+            f'(anchor, TLD, ruta de URL), no por un score pagado de terceros.</p>'
+            + (
+                "<table><thead><tr><th>Dominio</th><th>Clasificación</th><th>Señal(es)</th><th>Acción recomendada</th></tr></thead><tbody>"
+                + "".join(
+                    f'<tr><td>{_esc(v["source_domain"])}</td><td>{"🔴 tóxico" if v["classification"] == "toxic" else "🟡 revisar"}</td>'
+                    f'<td>{_esc(", ".join(v["signals"]))}</td><td>{_esc(v["recommended_action"])}</td></tr>'
+                    for v in flagged[:20]
+                )
+                + "</tbody></table>"
+                + (f'<p class="muted">Mostrando 20 de {len(flagged)} marcados.</p>' if len(flagged) > 20 else "")
+                if flagged
+                else '<p class="muted">Ninguno marcado — todos los backlinks pasaron las señales de patrón.</p>'
+            )
+        )
 
     # ---------- Local Pack de Google Maps (§ mejoras 2026-07-25) ----------
     lp_rows = local_pack.get("rows") or []
@@ -1105,6 +1132,9 @@ async def generate_html_report(project: dict) -> str:
 
   <h2>🔗 Backlinks</h2>
   {backlinks_block}
+
+  <h2>☠️ Backlinks tóxicos por patrón</h2>
+  {toxic_backlinks_block}
 
   <h2>📊 GA4 — conversiones orgánicas reales</h2>
   {ga4_block}

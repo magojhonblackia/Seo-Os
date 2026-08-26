@@ -1160,6 +1160,18 @@ resultado; probado también con datos sintéticos realistas end-to-end.
 
 Suite: 661 tests.
 
+### Backlinks tóxicos: faltaba la sección en el reporte (2026-08-26)
+
+Mismo bug de siempre, esta vez detectado por el usuario apenas terminó la
+implementación de arriba: `toxic_backlinks_report()` tenía endpoint propio
+pero no llegaba al reporte estático. Se agregó sección "☠️ Backlinks
+tóxicos por patrón" junto a la de Backlinks existente — mismo criterio
+honesto que Share of Voice (declara `available: false` con la muestra
+insuficiente en vez de inventar un %), tabla con dominio/clasificación/
+señales/acción recomendada para los backlinks marcados (tope de 20 filas).
+
+Suite: 663 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

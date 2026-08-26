@@ -11,7 +11,7 @@ from sqlalchemy import insert
 
 from backend.api.deps import get_project_or_404
 from backend.db.database import get_connection, now_iso
-from backend.db.schema import ai_visibility_checks, gsc_daily, gsc_queries, issues, keywords, pages, projects, scores, snapshots
+from backend.db.schema import ai_visibility_checks, backlinks, gsc_daily, gsc_queries, issues, keywords, pages, projects, scores, snapshots
 from backend.main import app
 from backend.reports import generate_html_report
 
@@ -700,3 +700,58 @@ async def test_reporte_tecnico_desglosa_por_tipo_de_check():
     section = html[idx:idx + 1500]
     assert "<td>Indexabilidad</td><td>🟢 1</td><td>🟡 0</td><td>🔴 1</td>" in section
     assert "<td>Schema</td><td>🟢 2</td><td>🟡 0</td><td>🔴 0</td>" in section
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_backlinks_toxicos():
+    """§ mejoras 2026-08-26: toxic_backlinks_report() ya existía (spec del
+    usuario) y tenía endpoint propio, pero no llegaba al reporte estático —
+    mismo patrón de bug que Share of Voice al principio de la sesión."""
+    project = _make_project("test-report-backlinks-toxicos")
+    pid = project["id"]
+    with get_connection() as conn:
+        conn.execute(insert(backlinks).values(
+            project_id=pid, source_url="https://spam-network.xyz/pagina",
+            source_domain="spam-network.xyz", target_url="https://reporte-test.com/",
+            anchor_text="buy backlinks cheap seo", source="bing",
+            domain_authority=None, spam_score=None, is_toxic=False,
+            first_seen=now_iso(), last_seen=now_iso(), status="active",
+        ))
+        for i in range(10):
+            conn.execute(insert(backlinks).values(
+                project_id=pid, source_url=f"https://real{i}.com/pagina",
+                source_domain=f"real{i}.com", target_url="https://reporte-test.com/",
+                anchor_text="Reporte Test SAS", source="bing",
+                domain_authority=None, spam_score=None, is_toxic=False,
+                first_seen=now_iso(), last_seen=now_iso(), status="active",
+            ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-backlinks-toxicos"))
+
+    section_idx = html.find("Backlinks tóxicos por patrón")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 1000]
+    assert "spam-network.xyz" in section
+    assert "toxic_anchor" in section
+    assert "Agregar a disavow" in section
+    assert "11 backlinks" in section  # 1 tóxico + 10 limpios
+
+
+@pytest.mark.asyncio
+async def test_reporte_backlinks_toxicos_declara_muestra_insuficiente():
+    project = _make_project("test-report-backlinks-toxicos-insuficiente")
+    with get_connection() as conn:
+        conn.execute(insert(backlinks).values(
+            project_id=project["id"], source_url="https://x.com/p", source_domain="x.com",
+            target_url="https://reporte-test.com/", anchor_text="ok", source="bing",
+            domain_authority=None, spam_score=None, is_toxic=False,
+            first_seen=now_iso(), last_seen=now_iso(), status="active",
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-backlinks-toxicos-insuficiente"))
+
+    section_idx = html.find("Backlinks tóxicos por patrón")
+    assert section_idx != -1
+    assert "no alcanza" in html[section_idx:section_idx + 500]
