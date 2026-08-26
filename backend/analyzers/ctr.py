@@ -118,6 +118,57 @@ def analyze_ctr(rows: list[dict], min_clicks: int = MIN_CLICKS_PARA_ANALIZAR) ->
     }
 
 
+def calculate_share_of_voice(rows: list[dict]) -> dict:
+    """% de la visibilidad máxima realista que el sitio captura hoy, usando el
+    CTR real de ESTE sitio por tramo de posición como referencia — nunca una
+    curva de industria (mismo criterio que el resto del módulo, ver docstring
+    del archivo). "Máxima realista" = si CADA keyword rankeara en el tramo
+    donde el sitio de hecho tiene su mejor CTR observado, no un 100% inventado.
+
+    Reutiliza el mismo mínimo de clics que analyze_ctr(): si la curva de CTR
+    no alcanza a significar nada, Share of Voice tampoco puede, así que se
+    declara no disponible en vez de mostrar un número sin sustento (§ mejoras
+    2026-08-25, pedido tras revisar el pricing de Semrush)."""
+    ctr_analysis = analyze_ctr(rows)
+    ctr_por_tramo = {c["bucket"]: c["ctr"] for c in ctr_analysis["curve"] if c.get("ctr") is not None}
+
+    if not ctr_analysis["reliable"] or not ctr_por_tramo:
+        return {
+            "available": False,
+            "reason": ctr_analysis.get("reliability_note") or "Sin CTR por tramo de posición todavía.",
+        }
+
+    mejor_ctr = max(ctr_por_tramo.values())
+
+    capturado = 0.0
+    maximo_posible = 0.0
+    keywords_incluidas = 0
+    for row in rows:
+        tramo = position_bucket(row.get("position"))
+        impresiones = row.get("impressions") or 0
+        if tramo is None or tramo not in ctr_por_tramo or not impresiones:
+            continue
+        capturado += ctr_por_tramo[tramo] * impresiones
+        maximo_posible += mejor_ctr * impresiones
+        keywords_incluidas += 1
+
+    if not maximo_posible:
+        return {"available": False, "reason": "Sin keywords con posición e impresiones reales para calcular."}
+
+    return {
+        "available": True,
+        "share_of_voice_pct": round(100 * capturado / maximo_posible, 1),
+        "keywords_included": keywords_incluidas,
+        "best_bucket_ctr": mejor_ctr,
+        "ctr_by_bucket": ctr_por_tramo,
+        "note": (
+            "Basado en el CTR real de este sitio por tramo de posición, no en una curva de industria: "
+            "mide qué % de tu visibilidad máxima realista (todas tus keywords en tu mejor tramo real de "
+            "hoy) estás capturando con las posiciones que de verdad tienes."
+        ),
+    }
+
+
 def build_ctr_issues(analysis: dict) -> list[MagoIssue]:
     issues: list[MagoIssue] = []
     nunca_clicadas = analysis.get("never_clicked") or []

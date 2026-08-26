@@ -644,6 +644,21 @@ async def generate_html_report(project: dict) -> str:
             )
         )
 
+    # ---------- Share of Voice (§ mejoras 2026-08-25, comparación con Semrush) ----------
+    sov_raw = (_latest_opportunities_raw(project["id"]) or {}).get("share_of_voice") or {}
+    if not sov_raw.get("available"):
+        sov_block = f'<p class="muted">{_esc(sov_raw.get("reason") or "Sin datos suficientes todavía.")}</p>'
+    else:
+        sov_pct = lambda v: f"{v * 100:.2f}%" if v is not None else "—"  # noqa: E731
+        sov_block = (
+            f'<p style="font-size:1.4em;"><strong>{sov_raw["share_of_voice_pct"]}%</strong></p>'
+            f'<p>% de tu visibilidad máxima realista que capturas hoy, calculado sobre '
+            f'<strong>{sov_raw["keywords_included"]} keyword(s)</strong> con posición e impresiones reales. '
+            f'"Máxima realista" = todas tus keywords rankeando en tu mejor tramo real de CTR '
+            f'({sov_pct(sov_raw.get("best_bucket_ctr"))}), no un 100% inventado.</p>'
+            f'<p class="muted">{_esc(sov_raw["note"])}</p>'
+        )
+
     # ---------- Competidores: matriz + keyword gap (§ 2026-08-02, faltaba en el reporte) ----------
     comp_matrix = competitors_data.get("matrix") or []
     if competitors_data.get("empty_reason") or len(comp_matrix) <= 1:
@@ -945,6 +960,9 @@ async def generate_html_report(project: dict) -> str:
 
   <h2>👆 CTR real por posición (baseline propio, sin curvas de industria)</h2>
   {ctr_block}
+
+  <h2>📢 Share of Voice (sobre tu propio baseline de CTR)</h2>
+  {sov_block}
 
   <h2>🤖 GEO / Acceso de crawlers de IA</h2>
   {geo_block}

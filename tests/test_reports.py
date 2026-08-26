@@ -493,3 +493,63 @@ async def test_reporte_incluye_extractabilidad_y_densidad_de_datos():
     assert "5 (2)" in row       # 5 preguntas, 2 sin respuesta
     assert "4.5" in row         # densidad numérica
     assert "✅ coincide" in row  # schema y header coinciden (mismo 2026-08-01)
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_share_of_voice():
+    """§ mejoras 2026-08-25 (comparación con Semrush): Share of Voice se
+    calcula en run_opportunities_analysis y se guarda en el mismo snapshot que
+    el CTR — el reporte debe leerlo de ahí, con la misma honestidad de
+    'sin muestra suficiente' cuando corresponda."""
+    project = _make_project("test-report-share-of-voice")
+    with get_connection() as conn:
+        conn.execute(
+            insert(snapshots).values(
+                project_id=project["id"], collector="opportunities", status="ok",
+                started_at=now_iso(), finished_at=now_iso(),
+                raw_data={
+                    "issues_found": 0,
+                    "share_of_voice": {
+                        "available": True,
+                        "share_of_voice_pct": 42.5,
+                        "keywords_included": 7,
+                        "best_bucket_ctr": 0.10,
+                        "ctr_by_bucket": {"1-3": 0.10, "4-10": 0.02},
+                        "note": "Basado en el CTR real de este sitio por tramo de posición, no en una curva de industria",
+                    },
+                },
+                created_at=now_iso(),
+            )
+        )
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-share-of-voice"))
+
+    assert "Share of Voice" in html
+    assert "42.5%" in html
+    assert "7 keyword" in html
+    assert "curva de industria" in html
+
+
+@pytest.mark.asyncio
+async def test_reporte_share_of_voice_declara_muestra_insuficiente():
+    project = _make_project("test-report-sov-insuficiente")
+    with get_connection() as conn:
+        conn.execute(
+            insert(snapshots).values(
+                project_id=project["id"], collector="opportunities", status="ok",
+                started_at=now_iso(), finished_at=now_iso(),
+                raw_data={
+                    "issues_found": 0,
+                    "share_of_voice": {"available": False, "reason": "Solo 2 clic(s): no alcanza para comparar."},
+                },
+                created_at=now_iso(),
+            )
+        )
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-sov-insuficiente"))
+
+    section_idx = html.find("Share of Voice")
+    assert section_idx != -1
+    assert "no alcanza" in html[section_idx:section_idx + 500]

@@ -9,6 +9,7 @@ from backend.analyzers.ctr import (
     analyze_ctr,
     build_ctr_curve,
     build_ctr_issues,
+    calculate_share_of_voice,
     find_never_clicked,
     position_bucket,
 )
@@ -110,6 +111,47 @@ def test_sin_filas_no_revienta():
     a = analyze_ctr([])
     assert a["curve"] == [] and a["site_ctr"] is None and a["never_clicked"] == []
     assert build_ctr_issues(a) == []
+
+
+# ---------- Share of Voice (§ mejoras 2026-08-25, comparación con Semrush) ----------
+
+def test_share_of_voice_no_disponible_con_pocos_clics():
+    """Mismo gate que analyze_ctr: sin muestra suficiente, no hay veredicto."""
+    rows = [_row(f"kw{i}", 2.0, 20, 0) for i in range(10)] + [_row("con-clic", 2.0, 20, 2)]
+    sov = calculate_share_of_voice(rows)
+    assert sov["available"] is False
+    assert "no alcanza" in sov["reason"]
+
+
+def test_share_of_voice_100_cuando_todo_esta_en_el_mejor_tramo():
+    """Si todas las keywords ya están en el tramo con mejor CTR real del sitio,
+    ya se captura el máximo realista: 100%, no un tope inventado."""
+    rows = [_row(f"kw{i}", 1.0, 100, 10) for i in range(5)]
+    sov = calculate_share_of_voice(rows)
+    assert sov["available"] is True
+    assert sov["share_of_voice_pct"] == 100.0
+    assert sov["keywords_included"] == 5
+
+
+def test_share_of_voice_baja_si_hay_keywords_en_tramos_de_peor_ctr():
+    rows = (
+        [_row(f"top{i}", 1.0, 100, 10) for i in range(3)]  # tramo 1-3: 10% CTR real
+        + [_row(f"bajo{i}", 15.0, 100, 0) for i in range(3)]  # tramo 11-20: 0% CTR real
+    )
+    sov = calculate_share_of_voice(rows)
+    assert sov["available"] is True
+    assert 0 < sov["share_of_voice_pct"] < 100
+    assert sov["best_bucket_ctr"] == 0.10
+
+
+def test_share_of_voice_nunca_usa_una_curva_de_industria():
+    import inspect
+
+    from backend.analyzers import ctr as modulo
+
+    fuente = inspect.getsource(modulo.calculate_share_of_voice)
+    for sospechoso in ["EXPECTED_CTR", "INDUSTRY_CTR", "CTR_BENCHMARK", "0.28", "0.31"]:
+        assert sospechoso not in fuente
 
 
 def test_nunca_usa_una_curva_de_industria():

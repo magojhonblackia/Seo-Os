@@ -13,7 +13,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from backend.analyzers.cannibalization import QueryPageRow, detect_cannibalization
 from backend.analyzers.content import detect_content_decay
-from backend.analyzers.ctr import analyze_ctr, build_ctr_issues
+from backend.analyzers.ctr import analyze_ctr, build_ctr_issues, calculate_share_of_voice
 from backend.analyzers.issue_store import reconcile_project_issues, record_issue
 from backend.analyzers.mago import MagoIssue
 from backend.analyzers.technical import analyze_page, page_data_from_stored_row
@@ -257,8 +257,13 @@ def run_opportunities_analysis(project_id: int) -> dict:
         # CTR contra el propio baseline del sitio (§ mejoras 2026-07-26). No usa
         # curvas de industria: el veredicto sale de los datos de GSC del propio
         # proyecto, y si no hay clics suficientes lo declara en vez de opinar.
-        ctr_analysis = analyze_ctr([dict(r._mapping) for r in query_rows])
+        query_dicts = [dict(r._mapping) for r in query_rows]
+        ctr_analysis = analyze_ctr(query_dicts)
         found_issues.extend(build_ctr_issues(ctr_analysis))
+
+        # Share of Voice (§ mejoras 2026-08-25, comparación con Semrush): mismo
+        # dato de GSC, mismo gate de fiabilidad que el CTR de arriba.
+        share_of_voice = calculate_share_of_voice(query_dicts)
 
         page_dicts = [dict(p._mapping) for p in page_rows]
         technical_score = calculate_technical_score(page_dicts)
@@ -297,7 +302,7 @@ def run_opportunities_analysis(project_id: int) -> dict:
                 status="ok",
                 started_at=now,
                 finished_at=now_iso(),
-                raw_data={"issues_found": len(found_issues), "ctr": ctr_analysis},
+                raw_data={"issues_found": len(found_issues), "ctr": ctr_analysis, "share_of_voice": share_of_voice},
                 created_at=now_iso(),
             )
         ).inserted_primary_key[0]

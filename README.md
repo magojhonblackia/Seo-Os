@@ -969,6 +969,31 @@ servicio técnico Apple que jc no usa todavía.
 
 Suite: 623 tests.
 
+### Share of Voice sobre el propio baseline de CTR (2026-08-25)
+
+Petición del usuario tras revisar el pricing de Semrush (un competidor
+comercial): tienen "Share of Voice" y SEO-OS no. Se implementó reutilizando
+el CTR-por-tramo real del sitio que ya calculaba `ctr.py` (§ mejoras
+2026-07-26) — misma regla del proyecto de no inventar una curva de CTR de
+industria, solo que aplicada a un metric nuevo.
+
+Qué mide `calculate_share_of_voice()` (`backend/analyzers/ctr.py`): qué % de
+la visibilidad máxima REALISTA del sitio se captura hoy, donde "máxima
+realista" es el escenario de que TODAS las keywords rankearan en el tramo
+donde el sitio de hecho tiene su mejor CTR observado — nunca un 100%
+inventado ni una curva ajena. Reutiliza el mismo gate de fiabilidad de
+`analyze_ctr()` (mínimo 30 clics): si la muestra no alcanza, se declara
+`available: false` con el motivo, igual que la sección de CTR de al lado.
+
+Se calcula en `run_opportunities_analysis()` sobre los mismos `query_rows`
+de GSC ya cargados (sin fetch nuevo), se guarda en el mismo snapshot
+`opportunities` que el CTR, expuesto en `/api/dashboard/{slug}/share-of-voice`
+y con sección propia en el reporte. Verificado en vivo contra jc: con solo 3
+clics reales en la ventana, correctamente declara "no alcanza" en vez de
+mostrar un número sin sustento.
+
+Suite: 629 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

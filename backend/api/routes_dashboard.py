@@ -702,6 +702,34 @@ def get_ga4(project: dict = Depends(get_project_or_404)) -> dict:
     }
 
 
+@router.get("/{slug}/share-of-voice")
+def get_share_of_voice(project: dict = Depends(get_project_or_404)) -> dict:
+    """Qué % de tu visibilidad máxima realista (todas tus keywords en tu mejor
+    tramo real de CTR) estás capturando hoy — del último snapshot de
+    'opportunities' (§ mejoras 2026-08-25, comparación con Semrush). Usa el
+    mismo gate de fiabilidad que /ctr: con pocos clics, se declara sin dato
+    en vez de mostrar un número sin sustento."""
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data, snapshots.c.finished_at)
+            .where(
+                snapshots.c.project_id == project["id"],
+                snapshots.c.collector == "opportunities",
+                snapshots.c.status == "ok",
+            )
+            .order_by(desc(snapshots.c.id))
+            .limit(1)
+        ).first()
+
+    if row is None or not row[0] or not row[0].get("share_of_voice"):
+        return {
+            "available": False,
+            "empty_reason": "Sin análisis aún — ejecuta 'Ejecutar auditoría' (incluye Share of Voice).",
+        }
+
+    return {"analyzed_at": row[1], **row[0]["share_of_voice"]}
+
+
 @router.get("/{slug}/content")
 def get_content(project: dict = Depends(get_project_or_404)) -> dict:
     pid = project["id"]
