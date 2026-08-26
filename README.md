@@ -1062,6 +1062,37 @@ corta:") → 1 de 11 preguntas, proporción mucho más sana.
 
 Suite: 635 tests.
 
+### Contenido casi-duplicado entre páginas de plantilla (2026-08-26)
+
+Segunda categoría portada de la auditoría manual del usuario contra
+jcreparaciones.com. Hallazgo real: `lib/cities.ts` tenía un campo
+`localContext` escrito a mano específicamente "para diferenciar contenido
+entre ciudades... evita que Google marque las páginas como duplicadas", pero
+`lib/renderBrandPage.tsx` nunca lo usaba — 31 ciudades × varias marcas
+renderizando el mismo texto con solo el nombre de la ciudad cambiando.
+Medido en ese momento con Python fuera de SEO-OS: 93.5% de similitud cruda
+entre `/reparacion-iphone/palmira` y `/reparacion-iphone/tulua`.
+
+`backend/analyzers/duplicate_content.py` (nuevo): agrupa páginas por
+"plantilla" sin conocer de antemano cuál segmento de la URL es la variable —
+genera todas las firmas posibles reemplazando UN segmento a la vez por `*`
+(`/reparacion-iphone/palmira` → `/reparacion-iphone/*` y `/*/palmira`); dos
+URLs que comparten una firma comparten plantilla. Con 3+ páginas en el mismo
+grupo, compara `body_text_sample` (ya guardado en el snapshot del crawler,
+sin fetch nuevo) por pares con `difflib.SequenceMatcher` — si el promedio
+supera 85%, genera UNA issue por grupo (no por página, es un problema de la
+plantilla entera), citando el par MÁS distinto de la muestra como evidencia
+(no el más parecido, para no exagerar). Corre dentro de
+`run_opportunities_analysis()`, mismo snapshot que CTR/Share of Voice.
+
+Verificado en vivo contra el crawl real de jc (snapshot del 2026-08-21, 100
+páginas): detectó exactamente los mismos 2 grupos encontrados a mano —
+`/reparacion-iphone/*` (12 páginas, 93.3% de similitud promedio) y
+`/reparacion-samsung/*` (11 páginas, 95.5%) — y los creó como issues "high"
+reales en el Action Plan de jc.
+
+Suite: 642 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

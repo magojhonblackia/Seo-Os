@@ -14,8 +14,10 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from backend.analyzers.cannibalization import QueryPageRow, detect_cannibalization
 from backend.analyzers.content import detect_content_decay
 from backend.analyzers.ctr import analyze_ctr, build_ctr_issues, calculate_share_of_voice
+from backend.analyzers.duplicate_content import build_duplicate_content_issues, detect_templated_duplicate_content
 from backend.analyzers.issue_store import reconcile_project_issues, record_issue
 from backend.analyzers.mago import MagoIssue
+from backend.analyzers.site_health import _latest_snapshot_raw
 from backend.analyzers.technical import analyze_page, page_data_from_stored_row
 from backend.db.database import get_connection, latest_gsc_query_date, now_iso
 from backend.db.schema import gsc_daily, gsc_queries, pages, scores, snapshots
@@ -26,7 +28,7 @@ MIN_IMPRESSIONS_FOR_CTR_SIGNAL = 5
 # (registradas con page_id=None) — se reconcilian a nivel proyecto al terminar.
 # "meta" aquí es el CTR-0 de top-10; las "meta" del crawler llevan page_id
 # no-nulo, así que el scope page_id IS NULL de la reconciliación no las toca.
-OPPORTUNITIES_OWNED_CATEGORIES = {"cannibalization", "pruning", "decay", "meta", "ctr"}
+OPPORTUNITIES_OWNED_CATEGORIES = {"cannibalization", "pruning", "decay", "meta", "ctr", "duplicate_content"}
 
 # Etiquetas humanas de cada `kind` en la tabla `scores` — fuente única para
 # reports.py (deltas del reporte) y routes_dashboard.py (comparador de
@@ -265,6 +267,13 @@ def run_opportunities_analysis(project_id: int) -> dict:
         # dato de GSC, mismo gate de fiabilidad que el CTR de arriba.
         share_of_voice = calculate_share_of_voice(query_dicts)
 
+        # Contenido casi-duplicado entre páginas de plantilla (§ mejoras
+        # 2026-08-26, auditoría manual): usa el texto ya guardado en el
+        # snapshot más reciente del crawler, sin fetch nuevo.
+        crawler_raw = _latest_snapshot_raw(conn, project_id, "crawler") or {}
+        duplicate_content_findings = detect_templated_duplicate_content(crawler_raw.get("pages") or [])
+        found_issues.extend(build_duplicate_content_issues(duplicate_content_findings))
+
         page_dicts = [dict(p._mapping) for p in page_rows]
         technical_score = calculate_technical_score(page_dicts)
         content_score = calculate_content_score(page_dicts)
@@ -302,7 +311,12 @@ def run_opportunities_analysis(project_id: int) -> dict:
                 status="ok",
                 started_at=now,
                 finished_at=now_iso(),
-                raw_data={"issues_found": len(found_issues), "ctr": ctr_analysis, "share_of_voice": share_of_voice},
+                raw_data={
+                    "issues_found": len(found_issues),
+                    "ctr": ctr_analysis,
+                    "share_of_voice": share_of_voice,
+                    "duplicate_content": duplicate_content_findings,
+                },
                 created_at=now_iso(),
             )
         ).inserted_primary_key[0]
