@@ -553,3 +553,149 @@ async def test_reporte_share_of_voice_declara_muestra_insuficiente():
     section_idx = html.find("Share of Voice")
     assert section_idx != -1
     assert "no alcanza" in html[section_idx:section_idx + 500]
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_headers_de_seguridad():
+    """§ mejoras 2026-08-25: security_headers.py se ejecutaba en cada auditoría
+    pero solo generaba una issue cuando algo faltaba — con todo bien
+    configurado (caso real de jc: HSTS+CSP+etc. presentes) el reporte no decía
+    nada al respecto. El dato crudo necesita sección propia, igual que CTR."""
+    project = _make_project("test-report-security-headers")
+    with get_connection() as conn:
+        conn.execute(
+            insert(snapshots).values(
+                project_id=project["id"], collector="security_headers", status="ok",
+                started_at=now_iso(), finished_at=now_iso(),
+                raw_data={
+                    "url": "https://reporte-test.com",
+                    "checked_status": 200,
+                    "analysis": {
+                        "hsts": {"present": True, "value": "max-age=31536000", "max_age": 31536000, "weak": False},
+                        "csp": {"present": True, "value": "default-src 'self'", "unsafe_tokens": [], "has_frame_ancestors": False},
+                        "x_frame_options": {"present": False, "value": None, "covered_by_csp": False},
+                        "x_content_type_options": {"present": True, "value": "nosniff"},
+                        "referrer_policy": {"present": True, "value": "strict-origin-when-cross-origin"},
+                        "permissions_policy": {"present": False, "value": None},
+                    },
+                },
+                created_at=now_iso(),
+            )
+        )
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-security-headers"))
+
+    section_idx = html.find("Headers de seguridad HTTP")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 1200]
+    assert "max-age=31536000" in section
+    assert "X-Frame-Options</td><td>❌" in section
+    assert "Permissions-Policy</td><td>❌" in section
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_indexnow_no_configurado():
+    """§ mejoras 2026-08-25: el check de IndexNow corría en cada auditoría
+    (status='skipped' cuando no hay INDEXNOW_KEY) pero no tenía NINGUNA
+    exposición — ni endpoint ni sección de reporte."""
+    project = _make_project("test-report-indexnow")
+    with get_connection() as conn:
+        conn.execute(
+            insert(snapshots).values(
+                project_id=project["id"], collector="indexnow", status="skipped",
+                started_at=now_iso(), finished_at=now_iso(),
+                error_message="IndexNow sin configurar. Pasos: 1) agrega INDEXNOW_KEY=...",
+                raw_data={"configured": False, "suggested_key": "abc123"},
+                created_at=now_iso(),
+            )
+        )
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-indexnow"))
+
+    section_idx = html.find("IndexNow (Bing")
+    assert section_idx != -1
+    assert "No configurado todavía" in html[section_idx:section_idx + 500]
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_comparacion_detallada_de_competidor():
+    """§ mejoras 2026-08-25: build_competitor_comparison() (schema_gap +
+    comparación de E-E-A-T/contenido) ya existía y tenía datos reales
+    (verificado en vivo contra jc: ifixit.com con schema_gap=['NewsArticle']),
+    pero solo se exponía bajo demanda vía /competitors/{domain}/detail — la
+    matriz del reporte nunca mostraba el detalle, se quedaba afuera."""
+    project = _make_project("test-report-competitor-detail")
+    pid = project["id"]
+    with get_connection() as conn:
+        conn.execute(
+            insert(pages).values(
+                project_id=pid, url="https://reporte-test.com/pagina",
+                first_seen=now_iso(), word_count=1000, schema_types=["LocalBusiness"],
+                title="Título", meta_description="Meta", has_author=True, has_date=True, has_contact=True,
+            )
+        )
+        conn.execute(
+            projects.update().where(projects.c.id == pid).values(competitors=["competidor-detalle.com"])
+        )
+        conn.execute(
+            insert(snapshots).values(
+                project_id=pid, collector="competitor:competidor-detalle.com", status="ok",
+                started_at=now_iso(), finished_at=now_iso(),
+                raw_data={
+                    "pages_crawled": 5, "technical_score": 80, "geo_score": 60,
+                    "schema_coverage": {"LocalBusiness": 5, "NewsArticle": 3},
+                    "avg_word_count": 500, "avg_title_length": 40, "avg_meta_length": 120,
+                    "eeat_signals": {"has_author_pct": 0, "has_date_pct": 20, "has_contact_pct": 0},
+                    "sample_keywords": [],
+                },
+                created_at=now_iso(),
+            )
+        )
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-competitor-detail"))
+
+    idx = html.find("competidor-detalle.com")
+    assert idx != -1
+    section = html[idx:idx + 800]
+    assert "NewsArticle" in section  # schema_gap real: ellos lo usan, nosotros no
+    assert "1000" in section or "1000.0" in section  # nuestro avg_word_count real
+
+
+@pytest.mark.asyncio
+async def test_reporte_tecnico_desglosa_por_tipo_de_check():
+    """§ mejoras 2026-08-25: el resumen 'Técnico' sumaba las 8 columnas del
+    semáforo (title, meta, h1, schema, og, canonical, indexable, x_robots) en
+    un solo conteo aplanado — no dejaba ver SI el problema estaba concentrado
+    en un check o disperso entre varios. Regresión: una página no-indexable
+    debe aparecer como rojo en 'Indexabilidad' pero NO afectar el conteo de
+    'Schema' (checks independientes, no un solo número global)."""
+    project = _make_project("test-report-tecnico-por-check")
+    pid = project["id"]
+    common = dict(
+        project_id=pid, first_seen=now_iso(),
+        title="Reparación de pantallas de iPhone en Cali",
+        meta_description="Reparamos pantallas de iPhone y Samsung en Cali con garantía de 6 meses. Agenda tu cita hoy mismo, precios claros.",
+        h1="Reparación de iPhone en Cali", schema_types=["LocalBusiness"],
+        og={"title": "x", "description": "y", "image": "z"},
+    )
+    with get_connection() as conn:
+        conn.execute(insert(pages).values(
+            **common, url="https://reporte-test.com/indexable",
+            canonical="https://reporte-test.com/indexable", is_indexable=True,
+        ))
+        conn.execute(insert(pages).values(
+            **common, url="https://reporte-test.com/no-indexable",
+            canonical="https://reporte-test.com/no-indexable", is_indexable=False,
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-tecnico-por-check"))
+
+    idx = html.find("<h2>🔧 Técnico</h2>")
+    assert idx != -1
+    section = html[idx:idx + 1500]
+    assert "<td>Indexabilidad</td><td>🟢 1</td><td>🟡 0</td><td>🔴 1</td>" in section
+    assert "<td>Schema</td><td>🟢 2</td><td>🟡 0</td><td>🔴 0</td>" in section

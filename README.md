@@ -994,6 +994,47 @@ mostrar un número sin sustento.
 
 Suite: 629 tests.
 
+### Auditoría "¿queda algo por fuera del reporte?": 4 huecos más (2026-08-25)
+
+Pedido explícito del usuario: revisar TODO lo que el sistema analiza (los 20
+`collector` distintos que escriben en `snapshots`, más los ~30 endpoints de
+`routes_dashboard.py`) contra lo que el reporte HTML realmente muestra, igual
+que la auditoría de GA4/Contenido/Preguntas/Competidores del 2026-07-25 y la
+de M11/M12 del 2026-08-02 — mismo patrón de bug, buscado de forma sistemática
+esta vez en vez de uno a uno según se fuera notando.
+
+Se recorrieron los 20 nombres de `collector` y los ~30 `@router.get` de
+`routes_dashboard.py` verificando cuáles llegaban al HTML. Cuatro huecos
+reales, los 4 verificados en vivo contra jc antes de darlos por corregidos:
+
+1. **Headers de seguridad HTTP** (`security_headers.py`): corría en cada
+   auditoría, pero solo generaba una issue cuando algo faltaba — con TODO
+   bien configurado (caso real de jc: HSTS con preload, CSP, Permissions-Policy,
+   etc.) el reporte no decía absolutamente nada al respecto. Nuevo endpoint
+   `/api/dashboard/{slug}/security-headers` + sección propia con el estado de
+   cada header (✅/❌), no solo los problemas.
+2. **IndexNow**: el chequeo (¿está publicado el key file?) corre en cada
+   auditoría automáticamente, pero no tenía NINGUNA exposición — ni cuando
+   está mal configurado. Nuevo endpoint `/api/dashboard/{slug}/indexnow` +
+   sección con los pasos exactos para activarlo si no lo está (jc no lo tiene
+   configurado, verificado en vivo).
+3. **Comparación detallada de competidor** (`schema_gap` + E-E-A-T/contenido
+   lado a lado): `build_competitor_comparison()` ya calculaba esto, pero solo
+   se exponía bajo demanda vía `/competitors/{domain}/detail` — la matriz del
+   reporte nunca mostraba el detalle. Verificado en vivo contra jc:
+   ifixit.com usa `NewsArticle` y jc no, dato real que estaba invisible.
+   Ahora el bloque de Competidores incluye esta comparación para cada
+   competidor escaneado.
+4. **Técnico por tipo de check**: el resumen sumaba los 8 checks del semáforo
+   (title, meta, h1, schema, og, canonical, indexable, x_robots) en un solo
+   conteo aplanado — "🟢 856 · 🟡 154 · 🔴 22" no decía si el problema estaba
+   concentrado en un check o disperso. Verificado en vivo contra jc: 100 de
+   129 páginas en amarillo por meta description y 20 en rojo por
+   indexabilidad — informacion que el conteo aplanado escondía por completo.
+   Ahora hay una tabla por check.
+
+Suite: 633 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

@@ -665,6 +665,61 @@ def get_site_health(project: dict = Depends(get_project_or_404)) -> dict:
     return {"available": True, "analyzed_at": row[1], **raw}
 
 
+@router.get("/{slug}/security-headers")
+def get_security_headers(project: dict = Depends(get_project_or_404)) -> dict:
+    """Estado real de HSTS/CSP/X-Frame-Options/etc. del último snapshot de
+    'security_headers' (§ mejoras 2026-08-25: se analizaba en cada auditoría
+    pero no tenía NINGUNA exposición — ni endpoint ni sección de reporte, solo
+    llegaban issues cuando algo estaba mal. Con todo correcto, como en jc, el
+    reporte no decía nada al respecto)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data, snapshots.c.status, snapshots.c.error_message, snapshots.c.finished_at)
+            .where(
+                snapshots.c.project_id == project["id"],
+                snapshots.c.collector == "security_headers",
+            )
+            .order_by(desc(snapshots.c.id))
+            .limit(1)
+        ).first()
+
+    if row is None or row[1] != "ok" or not row[0]:
+        return {
+            "available": False,
+            "empty_reason": (row[2] if row else None) or "Sin análisis de headers de seguridad aún.",
+        }
+
+    return {"available": True, "analyzed_at": row[3], "url": row[0].get("url"), "analysis": row[0].get("analysis")}
+
+
+@router.get("/{slug}/indexnow")
+def get_indexnow_status(project: dict = Depends(get_project_or_404)) -> dict:
+    """Si IndexNow (Bing/Yandex/Seznam/Naver) está configurado y el key file
+    verificado, del último snapshot de 'indexnow' (§ mejoras 2026-08-25:
+    corría en cada auditoría pero nunca se mostraba en ningún lado)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data, snapshots.c.status, snapshots.c.error_message, snapshots.c.finished_at)
+            .where(
+                snapshots.c.project_id == project["id"],
+                snapshots.c.collector == "indexnow",
+            )
+            .order_by(desc(snapshots.c.id))
+            .limit(1)
+        ).first()
+
+    if row is None:
+        return {"available": False, "empty_reason": "Sin chequeo de IndexNow aún."}
+
+    return {
+        "available": True,
+        "analyzed_at": row[3],
+        "status": row[1],
+        "message": row[2],
+        **(row[0] or {}),
+    }
+
+
 @router.get("/{slug}/ga4")
 def get_ga4(project: dict = Depends(get_project_or_404)) -> dict:
     """Sesiones y conversiones reales de búsqueda orgánica por landing page."""

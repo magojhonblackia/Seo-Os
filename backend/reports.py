@@ -31,9 +31,11 @@ from backend.api.routes_dashboard import (
     get_ai_visibility,
     get_backlinks,
     get_competitors,
+    get_competitor_detail,
     get_content,
     get_ga4,
     get_geo,
+    get_indexnow_status,
     get_keyword_ideas,
     get_indexation,
     get_keywords,
@@ -43,6 +45,7 @@ from backend.api.routes_dashboard import (
     get_question_ideas,
     get_rank_tracking,
     get_scorecards,
+    get_security_headers,
     get_serp_analysis,
     get_site_health,
     get_technical,
@@ -231,6 +234,8 @@ async def generate_html_report(project: dict) -> str:
     content_data = get_content(project)
     question_ideas = get_question_ideas(project)
     competitors_data = get_competitors(project)
+    security_headers_data = get_security_headers(project)
+    indexnow_data = get_indexnow_status(project)
     deltas = _score_history_deltas(project["id"])
 
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -258,6 +263,30 @@ async def generate_html_report(project: dict) -> str:
     high = action_plan.get("high", [])
     medium = action_plan.get("medium", [])
     tech_summary = technical.get("summary", {"green": 0, "yellow": 0, "red": 0})
+
+    # ---------- Técnico por tipo de check (§ mejoras 2026-08-25: el resumen
+    # anterior mezclaba los 8 checks (title, meta, h1, schema, og, canonical,
+    # indexable, x_robots) en un solo conteo aplanado — no dejaba ver SI el
+    # problema estaba concentrado en un check (ej. todos los OG) o disperso.
+    # analyze_page() ya calculaba esto por página vía get_technical(), solo
+    # faltaba agregarlo por columna en vez de sumarlo todo junto) ----------
+    _TECH_CHECK_LABELS = {
+        "title": "Title", "meta_description": "Meta description", "h1": "H1",
+        "schema": "Schema", "og": "Open Graph", "canonical": "Canonical",
+        "indexable": "Indexabilidad", "x_robots": "X-Robots-Tag",
+    }
+    tech_by_check: dict[str, dict[str, int]] = {
+        check: {"green": 0, "yellow": 0, "red": 0} for check in _TECH_CHECK_LABELS
+    }
+    for p in technical.get("pages") or []:
+        for check, sem in (p.get("row") or {}).items():
+            if check in tech_by_check:
+                tech_by_check[check][sem] += 1
+    tech_by_check_block = "".join(
+        f'<tr><td>{label}</td><td>🟢 {tech_by_check[check]["green"]}</td>'
+        f'<td>🟡 {tech_by_check[check]["yellow"]}</td><td>🔴 {tech_by_check[check]["red"]}</td></tr>'
+        for check, label in _TECH_CHECK_LABELS.items()
+    )
 
     # ---------- Resumen ejecutivo (IA opcional, grounded en hechos reales) ----------
     facts_lines = [
@@ -679,6 +708,41 @@ async def generate_html_report(project: dict) -> str:
             ) + "</li>"
             for domain, domain_gaps in gaps.items()
         )
+        # Detalle por competidor escaneado (§ mejoras 2026-08-25: build_competitor_comparison()
+        # ya calculaba schema_gap y comparación de E-E-A-T/contenido, pero solo se
+        # exponía vía /competitors/{domain}/detail bajo demanda — la matriz de arriba
+        # nunca mostraba el schema_gap ni la comparación real, se quedaba afuera).
+        detail_blocks = []
+        for r in comp_matrix:
+            domain = r["domain"]
+            if r.get("is_own_site"):
+                continue
+            detail = get_competitor_detail(domain, project)
+            if not detail.get("available"):
+                continue
+            own_e = detail["own"]["eeat_signals"] or {}
+            comp_e = detail["competitor"]["eeat_signals"] or {}
+            schema_gap = detail.get("schema_gap") or []
+            detail_blocks.append(
+                f'<p style="margin-top:14px;"><strong>{_esc(domain)}</strong></p>'
+                + (
+                    f'<p class="muted">Usa schema que nosotros NO tenemos: '
+                    f'<strong>{", ".join(_esc(s) for s in schema_gap)}</strong></p>'
+                    if schema_gap
+                    else ""
+                )
+                + "<table><thead><tr><th></th><th>Nosotros</th><th>Ellos</th></tr></thead><tbody>"
+                f'<tr><td>Palabras/página (prom.)</td><td>{detail["own"].get("avg_word_count") or "—"}</td>'
+                f'<td>{detail["competitor"].get("avg_word_count") or "—"}</td></tr>'
+                f'<tr><td>% páginas con autor</td><td>{own_e.get("has_author_pct", "—")}</td>'
+                f'<td>{comp_e.get("has_author_pct", "—")}</td></tr>'
+                f'<tr><td>% páginas con fecha</td><td>{own_e.get("has_date_pct", "—")}</td>'
+                f'<td>{comp_e.get("has_date_pct", "—")}</td></tr>'
+                f'<tr><td>% páginas con contacto</td><td>{own_e.get("has_contact_pct", "—")}</td>'
+                f'<td>{comp_e.get("has_contact_pct", "—")}</td></tr>'
+                "</tbody></table>"
+            )
+
         competitors_block = (
             "<table><thead><tr><th>Dominio</th><th>Páginas crawleadas</th><th>Técnico</th><th>GEO</th><th>Nota</th></tr></thead><tbody>"
             + rows_html
@@ -690,6 +754,54 @@ async def generate_html_report(project: dict) -> str:
                 if gap_items
                 else ""
             )
+            + (
+                f'<p style="margin-top:14px;"><strong>Comparación detallada (schema, E-E-A-T, longitud de contenido)</strong></p>'
+                + "".join(detail_blocks)
+                if detail_blocks
+                else ""
+            )
+        )
+
+    # ---------- Headers de seguridad HTTP (§ mejoras 2026-08-25: se analizaba en
+    # cada auditoría pero solo generaba issue cuando algo faltaba — con todo bien
+    # configurado, como en jc, el reporte no decía absolutamente nada al respecto) ----------
+    if not security_headers_data.get("available"):
+        security_headers_block = f'<p class="muted">{_esc(security_headers_data.get("empty_reason") or "Sin análisis todavía.")}</p>'
+    else:
+        sh = security_headers_data["analysis"]
+        def _sh_row(label: str, present: bool, extra: str = "") -> str:
+            icon = "✅" if present else "❌"
+            return f'<tr><td>{label}</td><td>{icon}</td><td>{_esc(extra)}</td></tr>'
+        security_headers_block = (
+            f'<p class="muted">Verificado sobre {_esc(security_headers_data.get("url") or "")} el '
+            f'{_esc((security_headers_data.get("analyzed_at") or "")[:10])}.</p>'
+            "<table><thead><tr><th>Header</th><th>Presente</th><th>Detalle</th></tr></thead><tbody>"
+            + _sh_row("Strict-Transport-Security (HSTS)", sh["hsts"]["present"], f'max-age={sh["hsts"].get("max_age") or "—"}' + (" ⚠️ débil" if sh["hsts"].get("weak") else ""))
+            + _sh_row("Content-Security-Policy (CSP)", sh["csp"]["present"], ", ".join(sh["csp"].get("unsafe_tokens") or []) or "sin tokens inseguros detectados")
+            + _sh_row("X-Frame-Options", sh["x_frame_options"]["present"] or sh["x_frame_options"].get("covered_by_csp", False), "cubierto por CSP frame-ancestors" if sh["x_frame_options"].get("covered_by_csp") else "")
+            + _sh_row("X-Content-Type-Options", sh["x_content_type_options"]["present"])
+            + _sh_row("Referrer-Policy", sh["referrer_policy"]["present"], sh["referrer_policy"].get("value") or "")
+            + _sh_row("Permissions-Policy", sh["permissions_policy"]["present"])
+            + "</tbody></table>"
+        )
+
+    # ---------- IndexNow (§ mejoras 2026-08-25: el check corría en cada
+    # auditoría pero no tenía ninguna exposición, ni siquiera cuando no estaba
+    # configurado — el usuario nunca se enteraba de que existía la opción) ----------
+    if not indexnow_data.get("available"):
+        indexnow_block = f'<p class="muted">{_esc(indexnow_data.get("empty_reason") or "Sin chequeo todavía.")}</p>'
+    elif not indexnow_data.get("configured"):
+        indexnow_block = (
+            '<p class="muted">No configurado todavía. IndexNow avisa a Bing/Yandex/Seznam/Naver que una URL '
+            "cambió, sin esperar a que vuelvan a crawlear por su cuenta — gratis, sin cuota real para "
+            f"este tamaño de sitio. {_esc(indexnow_data.get('message') or '')}</p>"
+        )
+    else:
+        ok = indexnow_data.get("file_found") and indexnow_data.get("key_matches")
+        indexnow_block = (
+            f'<p>{"✅ Configurado y verificado" if ok else "⚠️ Configurado pero con problema"}: key file '
+            f'{"encontrado y coincide" if ok else ("no encontrado" if not indexnow_data.get("file_found") else "encontrado pero NO coincide")} '
+            f'en <code>{_esc(indexnow_data.get("key_url") or "")}</code>.</p>'
         )
 
     # ---------- Contenido y E-E-A-T por página (§ 2026-08-02, faltaba en el reporte) ----------
@@ -939,6 +1051,13 @@ async def generate_html_report(project: dict) -> str:
 
   <h2>🔧 Técnico</h2>
   <p>🟢 {tech_summary.get("green", 0)} · 🟡 {tech_summary.get("yellow", 0)} · 🔴 {tech_summary.get("red", 0)} (celdas del semáforo, todas las páginas)</p>
+  <table><thead><tr><th>Check</th><th>Verde</th><th>Amarillo</th><th>Rojo</th></tr></thead><tbody>{tech_by_check_block}</tbody></table>
+
+  <h2>🔒 Headers de seguridad HTTP</h2>
+  {security_headers_block}
+
+  <h2>📡 IndexNow (Bing/Yandex/Seznam/Naver)</h2>
+  {indexnow_block}
 
   <h2>📝 Contenido y E-E-A-T por página</h2>
   {content_block}
