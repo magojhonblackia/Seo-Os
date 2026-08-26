@@ -18,6 +18,7 @@ from backend.analyzers.backlinks import (
     generate_disavow_file,
 )
 from backend.analyzers.competitors import build_competitive_matrix, build_competitor_comparison, get_keyword_gap_for_project
+from backend.analyzers.toxic_backlinks import Backlink, toxic_backlinks_report
 from backend.analyzers.mago import MagoIssue
 from backend.analyzers.opportunities import (
     SCORE_KINDS_LABELS,
@@ -1033,6 +1034,58 @@ def get_backlinks(project: dict = Depends(get_project_or_404)) -> dict:
             }
             for r in rows
         ],
+    }
+
+
+@router.get("/{slug}/toxic-backlinks")
+def get_toxic_backlinks(project: dict = Depends(get_project_or_404)) -> dict:
+    """Clasificación por patrón determinístico (§ mejoras 2026-08-26), no por
+    score pagado de terceros — ver backend/analyzers/toxic_backlinks.py.
+    available=False (nunca un % inventado) cuando la muestra es chica, mismo
+    criterio que /share-of-voice."""
+    with get_connection() as conn:
+        rows = _load_backlink_rows(conn, project["id"])
+
+    # Bing Webmaster Tools (única fuente activa hoy) no reporta follow/nofollow
+    # por enlace — se asume "follow" explícitamente, ver Backlink.link_type.
+    adapted = [
+        Backlink(
+            source_domain=r.source_domain,
+            source_url=r.source_url,
+            anchor_text=r.anchor_text or "",
+            target_url=r.target_url,
+            link_type="follow",
+            authority_score=r.domain_authority,
+        )
+        for r in rows
+    ]
+
+    config = project.get("config") or {}
+    report = toxic_backlinks_report(adapted, config.get("backlink_audit") or {})
+
+    if not report.available:
+        return {"available": False, "reason": report.reason, "total_backlinks": report.total_backlinks}
+
+    return {
+        "available": True,
+        "total_backlinks": report.total_backlinks,
+        "toxic_count": report.toxic_count,
+        "review_count": report.review_count,
+        "clean_count": report.clean_count,
+        "toxic_pct": report.toxic_pct,
+        "verdicts": [
+            {
+                "source_domain": v.backlink.source_domain,
+                "source_url": v.backlink.source_url,
+                "anchor_text": v.backlink.anchor_text,
+                "classification": v.classification,
+                "signals": v.signals,
+                "recommended_action": v.recommended_action,
+            }
+            for v in report.verdicts
+            if v.classification != "clean"
+        ],
+        "disavow_file_content": report.disavow_file_content,
     }
 
 

@@ -1129,6 +1129,37 @@ forzar aquí.
 
 Suite: 646 tests.
 
+### Backlinks tóxicos por patrón, no por score de terceros (2026-08-26)
+
+Cuarta categoría portada de la auditoría manual (spec detallada del usuario,
+mismo patrón que `duplicate_content.py` y `business_rules.py`): clasificar
+backlinks sin depender de un score pagado (Semrush Toxic Score, Ahrefs) ni
+de un LLM juzgando — reglas determinísticas (regex, listas, comparación de
+dominio), rápidas y gratis de correr a escala.
+
+`backend/analyzers/toxic_backlinks.py` (nuevo): 5 señales Nivel 1 sin red
+(anchor tóxico, TLD tóxico, patrón de ruta de granja de enlaces, plataforma
+gratuita, directorio genérico) que clasifican cada backlink en
+toxic/review/clean. El **whitelist del proyecto gana siempre** — sin él,
+cualquier directorio local legítimo con baja autoridad terminaría marcado
+igual que un PBN. Un backlink **nofollow** con señales tóxicas baja a
+`review`, no `toxic`: no pasa autoridad, así que el riesgo real es menor
+aunque el dominio parezca spam. Nivel 2 opcional (`apply_domain_content_check`,
+apagado por defecto): descarga la home del dominio y busca las mismas
+frases en su propio contenido, cacheado por dominio — nunca corre en el
+pipeline estándar, es un paso separado bajo demanda.
+
+Mismo gate de fiabilidad que `calculate_share_of_voice()`: con menos de 10
+backlinks, `available: False` con la razón, nunca un `%` inventado sobre
+una muestra chica. Reutiliza `generate_disavow_file()` ya existente para el
+formato oficial de Google (dedup por dominio). Nuevo endpoint
+`/api/dashboard/{slug}/toxic-backlinks`. Verificado: jc no tiene backlinks
+cargados hoy (el collector corrió pero Bing no reportó ninguno) — el
+endpoint declara `available: False` correctamente en vez de fabricar un
+resultado; probado también con datos sintéticos realistas end-to-end.
+
+Suite: 661 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían
