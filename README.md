@@ -929,6 +929,46 @@ todavía (el prompt de marca no genera issue, por diseño — ver arriba).
 
 Suite: 617 tests.
 
+### TF-IDF: qué términos comparte el top-10 real y nos faltan (2026-08-25)
+
+Petición del usuario tras revisar el listado de funciones de Seobility (un
+competidor comercial): tienen una "herramienta TF*IDF" que SEO-OS no tenía.
+Se implementó extendiendo `serp_compare.py` (ya fetch-eaba el top-10 real +
+nuestra página) en vez de duplicar el trabajo de red — el mismo dato ya
+disponible, un análisis nuevo encima.
+
+TF-IDF real (no una aproximación): document frequency + term frequency sobre
+el texto completo de cada página del top-10 real, comparado contra el
+nuestro. Se excluye la keyword semilla (obvio que debe aparecer) y cualquier
+término que solo aparezca en UNA página del top-10 (ruido de esa página
+sola, no señal compartida). Sin dependencia nueva — stopwords en español
+hardcodeadas, todo en Python estándar.
+
+**Honestidad (P1), el límite más importante de este módulo**: esto es
+vocabulario COMPARTIDO entre páginas que ya rankean — una correlación de
+cobertura temática, nunca una causa. Google no puntúa coincidencia de
+TF-IDF; usar estos términos puede reflejar un tema más completo, no
+garantiza nada. El disclaimer lo dice explícito en la UI.
+
+**Bug real encontrado verificando en vivo contra jc, arreglado antes de
+confiar en el resultado**: sin quitar `<nav>/<header>/<footer>/<aside>`
+antes de extraer el texto, el "gap" salía lleno de boilerplate de plantilla
+("síguenos", "contáctanos", horario) que 2 de 3 páginas comparten por usar
+un template parecido — no por cobertura temática real. Se corrigió quitando
+esos tags antes de extraer texto (mismo criterio que M11/M12). Límite
+honesto que SIGUE sin resolver, documentado en el código: sitios que ponen
+horario/dirección fuera de esas etiquetas semánticas (widgets sin HTML5
+correcto) todavía pueden colar alguna palabra suelta — resolverlo del todo
+necesitaría un extractor de "contenido principal" (tipo Mozilla Readability),
+fuera de alcance de este pase.
+
+Verificado en vivo contra las 2 keywords reales de jc con top-10 guardado:
+para "servicio tecnico apple cali" surgieron términos genuinos como
+"autorizado", "reemplazo", "dispositivo", "cita" — vocabulario real de
+servicio técnico Apple que jc no usa todavía.
+
+Suite: 623 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

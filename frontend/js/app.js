@@ -612,6 +612,17 @@ async function runSerpCompare() {
           .join("")
       : '<li>Ninguna diferencia medible relevante: en lo que se puede medir en la página, estás a la par o por encima del top-10.</li>';
 
+    const termGaps = d.term_gaps || [];
+    const termGapsHtml = termGaps.length
+      ? `<strong>Términos que el top-10 comparte y tú no usas</strong> (TF-IDF sobre el top-10 real):
+        <table style="margin:6px 0 10px; width:100%; font-size:11px;">
+          <thead><tr><th style="text-align:left;">Término</th><th style="text-align:left;">Páginas del top-10 que lo usan</th></tr></thead>
+          <tbody>${termGaps
+            .map((g) => `<tr><td>${escapeHtml(g.term)}</td><td>${g.pages_using_it} de ${g.pages_total}</td></tr>`)
+            .join("")}</tbody>
+        </table>`
+      : "";
+
     statusEl.textContent = `${s.pages_measured || 0} página(s) del top-10 medidas · tu posición: ${posText}`;
     resultEl.innerHTML = `
       <div class="empty-state" style="font-size:12px; text-align:left;">
@@ -624,6 +635,7 @@ async function runSerpCompare() {
           ${Math.round((s.pct_with_author || 0) * 100)}% con autor · ${s.median_internal_links ?? "—"} enlaces internos.
           ${ours ? `<br>Tu página: ${ours.word_count} palabras · ${ours.has_schema ? "con" : "sin"} schema · ${ours.internal_links_count} enlaces internos.` : ""}
         </div>
+        ${termGapsHtml}
         <div style="color:var(--text-muted);">⚠️ ${escapeHtml(d.disclaimer)}</div>
       </div>`;
   } catch (err) {
