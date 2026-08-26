@@ -1093,6 +1093,42 @@ reales en el Action Plan de jc.
 
 Suite: 642 tests.
 
+### Reglas de negocio prohibidas por proyecto (2026-08-26)
+
+Tercera y última categoría portada de la auditoría manual contra
+jcreparaciones.com. Hallazgo real: CLAUDE.md de ese proyecto prohíbe "nunca
+escribir 'diagnóstico gratis'... ninguna variación en ningún archivo", y una
+FAQ en `/reparacion-iphone-cali` la mencionaba (uso contrastivo, pero la
+regla es literal y sin excepción). Ya corregido en el sitio real por el
+usuario tras la auditoría manual.
+
+Por qué es POR PROYECTO y no una lista genérica: "diagnóstico gratis" solo
+está prohibido en JC Reparaciones porque cobran la revisión — otro proyecto
+de SEO-OS puede ofrecerlo de verdad. La lista vive en
+`project.config["banned_phrases"]`, mismo patrón ya establecido para
+`ai_visibility_prompts` (`backend/collectors/ai_visibility.py`): configurado
+a mano por el dueño del proyecto directamente en la columna `config`, sin
+UI nueva — igual que ese otro campo, que tampoco la tiene.
+
+`backend/analyzers/business_rules.py` (nuevo): `build_banned_phrase_issues()`
+genera una issue "high" por cada frase encontrada. La detección ocurre en
+`_extract_page_data()` (`backend/collectors/crawler.py`) sobre el texto
+COMPLETO de la página (antes de recortar a los 5000 caracteres de
+`body_text_sample` que usa el resto de analyzers) — una frase prohibida
+puede estar en cualquier parte, no solo al principio. Case-insensitive.
+Explícitamente NO corre sobre sitios de competidores (no tendría sentido
+exigirles las reglas de negocio de otra empresa).
+
+Alcance honesto: esto solo cubre reglas de tipo "frase literal prohibida"
+(como "diagnóstico gratis"). La otra regla real de CLAUDE.md que apareció en
+la misma auditoría — "nunca atribuir 'Sin servicio' a la antena, es siempre
+falla de placa" — es una regla de ATRIBUCIÓN CAUSAL, no de presencia de una
+palabra (mencionar "antena" como una causa técnica real, ej. en una página de
+reballing, es legítimo) — necesitaría un chequeo distinto, no se intentó
+forzar aquí.
+
+Suite: 646 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

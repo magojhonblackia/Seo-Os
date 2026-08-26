@@ -341,6 +341,50 @@ def test_extract_page_data_incluye_body_text_sample():
     assert "servicio técnico especializado" in page.body_text_sample.lower()
 
 
+# ---------- Reglas de negocio prohibidas por proyecto (§ mejoras 2026-08-26) ----------
+
+def test_extract_page_data_detecta_frase_prohibida():
+    """Reproduce el hallazgo real en jcreparaciones.com/reparacion-iphone-cali:
+    una FAQ menciona 'diagnóstico gratis' al explicar por qué NO lo ofrecen —
+    la regla del proyecto es literal, así que debe marcarse igual."""
+    html = """
+    <html><body><h1>Servicio técnico</h1>
+      <p>Porque un diagnóstico real toma tiempo. Cuando un taller anuncia
+      "diagnóstico gratis" ese costo casi siempre está escondido en el precio final.</p>
+    </body></html>
+    """
+    page = _extract_page_data(
+        "https://x.com/faq", 200, html, banned_phrases=["diagnóstico gratis", "envío gratis"]
+    )
+    assert page.banned_phrases_found == ["diagnóstico gratis"]
+
+
+def test_extract_page_data_sin_frases_prohibidas_configuradas_no_marca_nada():
+    html = "<html><body><h1>Cualquier cosa</h1><p>Texto normal.</p></body></html>"
+    page = _extract_page_data("https://x.com/a", 200, html)
+    assert page.banned_phrases_found == []
+    page2 = _extract_page_data("https://x.com/a", 200, html, banned_phrases=[])
+    assert page2.banned_phrases_found == []
+
+
+def test_extract_page_data_frase_prohibida_es_case_insensitive():
+    html = "<html><body><h1>x</h1><p>Ofrecemos DIAGNÓSTICO GRATIS este mes.</p></body></html>"
+    page = _extract_page_data("https://x.com/promo", 200, html, banned_phrases=["diagnóstico gratis"])
+    assert page.banned_phrases_found == ["diagnóstico gratis"]
+
+
+def test_build_banned_phrase_issues_una_issue_por_frase():
+    from backend.analyzers.business_rules import build_banned_phrase_issues
+
+    assert build_banned_phrase_issues("https://x.com/a", []) == []
+
+    issues = build_banned_phrase_issues("https://x.com/a", ["diagnóstico gratis", "envío gratis"])
+    assert len(issues) == 2
+    assert all(i.category == "banned_phrase" for i in issues)
+    assert all(i.severity == "high" for i in issues)
+    assert "diagnóstico gratis" in issues[0].title
+
+
 # ---------- Extraíbilidad de respuestas por IA (§ mejoras 2026-08-02) ----------
 
 def test_looks_like_question_heading_reconoce_preguntas_reales_en_español():

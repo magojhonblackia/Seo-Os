@@ -24,6 +24,7 @@ import httpx
 from bs4 import BeautifulSoup
 from sqlalchemy import insert, select, update
 
+from backend.analyzers.business_rules import build_banned_phrase_issues
 from backend.analyzers.content import (
     EeatSignals,
     build_answer_extractability_issues,
@@ -86,6 +87,7 @@ class CrawledPage:
     schema_nodes: list[dict] = field(default_factory=list)  # {types, fields} para validar Rich Results (§ #5)
     answer_extractability: dict = field(default_factory=dict)  # § mejoras 2026-08-02, ver _analyze_answer_extractability
     fact_density: dict = field(default_factory=dict)  # § mejoras 2026-08-02, ver _analyze_fact_density
+    banned_phrases_found: list[str] = field(default_factory=list)  # § mejoras 2026-08-26, ver README
 
 
 def _same_domain(url: str, root_netloc: str) -> bool:
@@ -249,7 +251,7 @@ def _extract_h1_text(h1) -> str:
     return _WHITESPACE_RE.sub(" ", node.get_text()).strip()
 
 
-def _extract_page_data(url: str, status_code: int, html: str) -> CrawledPage:
+def _extract_page_data(url: str, status_code: int, html: str, banned_phrases: list[str] | None = None) -> CrawledPage:
     soup = BeautifulSoup(html, "lxml")
 
     title_tag = soup.find("title")
@@ -312,6 +314,17 @@ def _extract_page_data(url: str, status_code: int, html: str) -> CrawledPage:
     fact_density = _analyze_fact_density(soup, url)
     schema_date_published, schema_date_modified = _extract_schema_dates(soup)
 
+    # § mejoras 2026-08-26 (auditoría manual contra jcreparaciones.com,
+    # categoría 3 del prompt): reglas de negocio prohibidas SON específicas de
+    # cada proyecto (ej. "diagnóstico gratis" en JC), así que viven en
+    # project.config["banned_phrases"], no hardcodeadas aquí. Se busca sobre
+    # el texto COMPLETO de la página (body_text, antes de recortar a los 5000
+    # caracteres de body_text_sample) — una frase prohibida puede estar en
+    # cualquier parte de la página, no solo al principio.
+    banned_phrases_found = sorted(
+        {phrase for phrase in (banned_phrases or []) if phrase and phrase.lower() in body_text.lower()}
+    )
+
     return CrawledPage(
         url=url,
         status_code=status_code,
@@ -339,6 +352,7 @@ def _extract_page_data(url: str, status_code: int, html: str) -> CrawledPage:
         fact_density=fact_density,
         schema_date_published=schema_date_published,
         schema_date_modified=schema_date_modified,
+        banned_phrases_found=banned_phrases_found,
     )
 
 
@@ -580,6 +594,7 @@ def crawl_site(
     start_url_raw: str,
     max_pages: int,
     on_progress=None,
+    banned_phrases: list[str] | None = None,
 ) -> tuple[list[CrawledPage], list[str]]:
     """Bucle de rastreo compartido (regla del Arquitecto: no duplicar lógica).
 
@@ -633,7 +648,7 @@ def crawl_site(
                     continue
                 if len(response.content) > MAX_BODY_BYTES:
                     continue
-                page = _extract_page_data(url, response.status_code, response.text)
+                page = _extract_page_data(url, response.status_code, response.text, banned_phrases=banned_phrases)
                 # response.history no está vacío cuando httpx siguió una o más
                 # redirecciones: la URL enlazada internamente NO es la final.
                 # Enlazar directo al destino ahorra un salto (§ cobertura).
@@ -678,10 +693,15 @@ class TechnicalCrawler(BaseCollector):
     def collect(self) -> CollectorResult:
         slug = self.project["slug"]
         progress.start(slug, self.max_pages, phase="crawling")
+        # Las reglas de negocio prohibidas son del PROYECTO auditado, nunca
+        # del competidor (is_competitor) — no tendría sentido exigirle a un
+        # competidor que cumpla las reglas de negocio de otra empresa.
+        banned_phrases = (self.project.get("config") or {}).get("banned_phrases") or [] if not self.is_competitor else []
         crawled_pages, errors = crawl_site(
             self.project["url"],
             self.max_pages,
             on_progress=lambda done, queued, url: progress.update(slug, done, url),
+            banned_phrases=banned_phrases,
         )
         progress.set_phase(slug, "analyzing")
 
@@ -740,6 +760,7 @@ class TechnicalCrawler(BaseCollector):
                 content_issues += build_freshness_issues(
                     raw["url"], raw.get("schema_date_modified"), raw.get("http_last_modified")
                 )
+                content_issues += build_banned_phrase_issues(raw["url"], raw.get("banned_phrases_found") or [])
 
                 existing = conn.execute(
                     select(pages.c.id).where(
