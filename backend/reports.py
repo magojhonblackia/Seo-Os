@@ -842,20 +842,22 @@ async def generate_html_report(project: dict) -> str:
 
         total_questions = sum(p.get("question_headings_count") or 0 for p in content_pages)
         total_without_answer = sum(p.get("question_headings_without_answer") or 0 for p in content_pages)
+        total_cta_only = sum(p.get("question_headings_answered_with_cta_only") or 0 for p in content_pages)
         total_vague_claims = sum(p.get("vague_authority_claims_count") or 0 for p in content_pages)
         pages_with_original_data = sum(1 for p in content_pages if p.get("original_data_signal"))
 
         ai_extractability_block = (
             f'<p>De {total_questions} encabezado(s) de pregunta detectados en todo el sitio, '
-            f'<strong>{total_without_answer}</strong> no tienen una respuesta directa justo después. '
+            f'<strong>{total_without_answer}</strong> no tienen una respuesta directa justo después y '
+            f'<strong>{total_cta_only}</strong> más tienen párrafo pero es solo llamado a la acción, sin responder. '
             f'<strong>{total_vague_claims}</strong> afirmación(es) vaga(s) de autoridad sin fuente citada. '
             f'{pages_with_original_data} página(s) con señal de datos/análisis propios.</p>'
-            "<table><thead><tr><th>Página</th><th>Preguntas (sin respuesta)</th><th>Párrafos &gt;250 palabras</th>"
+            "<table><thead><tr><th>Página</th><th>Preguntas (sin respuesta / solo CTA)</th><th>Párrafos &gt;250 palabras</th>"
             "<th>Densidad numérica /100p</th><th>Afirmaciones vagas</th><th>Enlaces a fuentes de autoridad</th>"
             "<th>Frescura (schema vs servidor)</th></tr></thead><tbody>"
             + "".join(
                 f'<tr><td>{_esc(p["url"])}</td>'
-                f'<td>{p.get("question_headings_count") or 0} ({p.get("question_headings_without_answer") or 0})</td>'
+                f'<td>{p.get("question_headings_count") or 0} ({p.get("question_headings_without_answer") or 0} / {p.get("question_headings_answered_with_cta_only") or 0})</td>'
                 f'<td>{p.get("long_passages_over_250w") or 0}</td>'
                 f'<td>{p.get("numeric_density_per_100w") if p.get("numeric_density_per_100w") is not None else "—"}</td>'
                 f'<td>{p.get("vague_authority_claims_count") or 0}</td>'

@@ -170,6 +170,27 @@ def build_answer_extractability_issues(url: str, metrics: dict) -> list[MagoIssu
             )
         )
 
+    cta_only = metrics.get("question_headings_answered_with_cta_only") or 0
+    if cta_only > 0:
+        issues.append(
+            MagoIssue(
+                severity="medium",
+                category="ai_extractability",
+                title=(
+                    f"{url}: {cta_only} encabezado(s) de pregunta con párrafo siguiente que es "
+                    "solo llamado a la acción, sin responder"
+                ),
+                page_url=url,
+                suggested=(
+                    "El párrafo tiene texto (por eso no cae en 'sin respuesta') pero solo empuja a "
+                    "contactar/cotizar sin nombrar una causa, precio o dato concreto — un motor de IA no "
+                    "tiene nada citable ahí. El CTA puede quedarse, pero agrega la respuesta real antes o al lado."
+                ),
+                effort="1h",
+                impact=2,
+            )
+        )
+
     long_passages = metrics.get("long_passages_over_250w") or 0
     if long_passages > 0:
         issues.append(

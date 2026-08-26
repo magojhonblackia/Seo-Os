@@ -7,6 +7,7 @@ from sqlalchemy import insert, select
 from backend.analyzers.issue_store import reconcile_page_issues, reconcile_project_issues
 from backend.collectors.base import BaseCollector, CollectorResult
 from backend.collectors.crawler import (
+    _analyze_answer_extractability,
     _extract_page_data,
     _looks_like_question_heading,
     _normalize_url,
@@ -381,6 +382,42 @@ def test_analyze_answer_extractability_caso_real():
     assert ae["has_tldr_or_summary"] is False
 
 
+def test_analyze_answer_extractability_detecta_parrafo_que_es_solo_cta():
+    """Bug real encontrado en la auditoría manual del 2026-08-26 contra
+    jcreparaciones.com (/por-que-no-carga-mi-celular-cali): el H1 pregunta
+    "¿por qué no carga?" y el párrafo siguiente tiene texto real (no cae en
+    'sin respuesta') pero solo repite síntomas y empuja WhatsApp — nunca
+    nombra una causa. Sin distinguir este caso, without_answer=0 aunque la
+    IA no tenga nada citable ahí."""
+    html = """
+    <html><body>
+      <h1>¿Por qué no carga mi celular?</h1>
+      <p>No carga, carga muy lento o aparece cargando pero no sube el porcentaje.
+      Si los pasos DIY no funcionan, lo revisamos con cotización antes de tocar nada,
+      escríbenos por WhatsApp para agenda tu cita.</p>
+    </body></html>
+    """
+    ae = _analyze_answer_extractability(_soup(html))
+    assert ae["question_headings_count"] == 1
+    assert ae["question_headings_without_answer"] == 0  # sí hay párrafo con texto
+    assert ae["question_headings_answered_with_cta_only"] == 1
+
+
+def test_analyze_answer_extractability_no_marca_cta_si_el_parrafo_da_un_dato_concreto():
+    """Un párrafo con CTA que TAMBIÉN da un número (precio, tiempo, causa con
+    cifra) sí es una respuesta real — el CTA solo no basta para descartarlo,
+    tiene que faltar el dato."""
+    html = """
+    <html><body>
+      <h1>¿Cuánto cuesta cambiar la pantalla del iPhone?</h1>
+      <p>El cambio de pantalla cuesta desde $280.000 COP con pieza original.
+      Escríbenos por WhatsApp para cotizar tu modelo exacto.</p>
+    </body></html>
+    """
+    ae = _analyze_answer_extractability(_soup(html))
+    assert ae["question_headings_answered_with_cta_only"] == 0
+
+
 def test_build_answer_extractability_issues_solo_reporta_lo_que_tiene_evidencia_clara():
     from backend.analyzers.content import build_answer_extractability_issues
 
@@ -399,6 +436,16 @@ def test_build_answer_extractability_issues_solo_reporta_lo_que_tiene_evidencia_
     issues = build_answer_extractability_issues("https://x.com/b", con_huecos)
     assert len(issues) == 2
     assert all(i.category == "ai_extractability" for i in issues)
+
+    # CTA-only (§ mejoras 2026-08-26): issue propia, separada de without_answer.
+    con_cta_only = {
+        "question_headings_count": 3, "question_headings_without_answer": 0,
+        "question_headings_answered_with_cta_only": 1,
+        "answers_in_target_band": 1, "long_passages_over_250w": 0, "has_tldr_or_summary": False,
+    }
+    cta_issues = build_answer_extractability_issues("https://x.com/c", con_cta_only)
+    assert len(cta_issues) == 1
+    assert "solo llamado a la acción" in cta_issues[0].title
     assert "2 de 5" in issues[0].title
 
 

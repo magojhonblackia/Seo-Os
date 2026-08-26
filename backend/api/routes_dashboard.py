@@ -807,6 +807,7 @@ def get_content(project: dict = Depends(get_project_or_404)) -> dict:
             # datos/hechos + frescura (adaptado de claude-seo-ai, ver README)
             "question_headings_count": p.question_headings_count,
             "question_headings_without_answer": p.question_headings_without_answer,
+            "question_headings_answered_with_cta_only": p.question_headings_answered_with_cta_only,
             "answers_in_target_band": p.answers_in_target_band,
             "long_passages_over_250w": p.long_passages_over_250w,
             "has_tldr_or_summary": p.has_tldr_or_summary,

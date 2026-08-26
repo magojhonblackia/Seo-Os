@@ -405,6 +405,21 @@ _WINDUP_RE = re.compile(
 )
 _TLDR_RE = re.compile(r"\b(resumen|en resumen|en pocas palabras|puntos clave|lo esencial|tl;?dr)\b", re.IGNORECASE)
 
+# § mejoras 2026-08-26 (auditoría manual contra jcreparaciones.com, ver README):
+# un encabezado-pregunta con un párrafo NO vacío y sin frase de relleno pasaba
+# como "con respuesta" aunque el párrafo fuera puro CTA de marketing
+# ("cotización", "escríbenos") sin ningún dato concreto — caso real encontrado
+# en /por-que-no-carga-mi-celular-cali: el H1 pregunta "¿por qué no carga?" y
+# el párrafo siguiente solo repite síntomas + empuja WhatsApp, nunca nombra
+# una causa. Un CTA no es lo mismo que una respuesta, así que se cuenta aparte
+# de `without_answer` (el fix es distinto: no es quitar el CTA, es agregar el
+# dato que falta al lado).
+_CTA_ONLY_RE = re.compile(
+    r"\b(cotizaci[oó]n|cotiza(r|mos)?|consultar\s+ahora|escr[ií]benos|cont[aá]ctanos|contacta(nos)?|"
+    r"whatsapp|agenda\s+tu\s+cita|ll[aá]manos|ven\s+(sin\s+cita|a\s+vernos)|reserva\s+tu\s+cita)\b",
+    re.IGNORECASE,
+)
+
 
 def _looks_like_question_heading(text: str) -> bool:
     """Bug real encontrado verificando en vivo contra jc: "¿Cómo saber si la
@@ -445,6 +460,7 @@ def _analyze_answer_extractability(soup: BeautifulSoup) -> dict:
     question_count = 0
     without_answer = 0
     in_target_band = 0
+    cta_only = 0
     for h in headings:
         if not _looks_like_question_heading(h.get_text(separator=" ", strip=True)):
             continue
@@ -454,6 +470,8 @@ def _analyze_answer_extractability(soup: BeautifulSoup) -> dict:
         has_direct_answer = word_count > 0 and not _WINDUP_RE.match(answer)
         if not has_direct_answer:
             without_answer += 1
+        elif _CTA_ONLY_RE.search(answer) and not _NUMERIC_RE.search(answer):
+            cta_only += 1
         if 40 <= word_count <= 60:
             in_target_band += 1
 
@@ -468,6 +486,7 @@ def _analyze_answer_extractability(soup: BeautifulSoup) -> dict:
     return {
         "question_headings_count": question_count,
         "question_headings_without_answer": without_answer,
+        "question_headings_answered_with_cta_only": cta_only,
         "answers_in_target_band": in_target_band,
         "long_passages_over_250w": long_passages,
         "has_tldr_or_summary": has_tldr,
@@ -752,6 +771,7 @@ class TechnicalCrawler(BaseCollector):
                     "has_contact": eeat_signals.has_contact,
                     "question_headings_count": answer_extractability.get("question_headings_count"),
                     "question_headings_without_answer": answer_extractability.get("question_headings_without_answer"),
+                    "question_headings_answered_with_cta_only": answer_extractability.get("question_headings_answered_with_cta_only"),
                     "answers_in_target_band": answer_extractability.get("answers_in_target_band"),
                     "long_passages_over_250w": answer_extractability.get("long_passages_over_250w"),
                     "has_tldr_or_summary": answer_extractability.get("has_tldr_or_summary"),

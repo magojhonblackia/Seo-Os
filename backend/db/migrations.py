@@ -73,6 +73,7 @@ _PAGES_COLUMNS_FASE1 = {
     # § mejoras 2026-08-02: extraíbilidad de respuestas por IA (ver schema.py)
     "question_headings_count": "INTEGER",
     "question_headings_without_answer": "INTEGER",
+    "question_headings_answered_with_cta_only": "INTEGER",  # § mejoras 2026-08-26
     "answers_in_target_band": "INTEGER",
     "long_passages_over_250w": "INTEGER",
     "has_tldr_or_summary": "BOOLEAN",

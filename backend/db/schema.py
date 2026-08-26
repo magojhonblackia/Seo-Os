@@ -142,6 +142,10 @@ pages = Table(
     # son lo que un motor de IA puede citar sin leer todo el artículo.
     Column("question_headings_count", Integer),
     Column("question_headings_without_answer", Integer),
+    # § mejoras 2026-08-26: un encabezado-pregunta puede tener un párrafo NO
+    # vacío después (así que without_answer no lo cuenta) y aun así ser puro
+    # CTA de marketing sin ninguna respuesta real — ver README.
+    Column("question_headings_answered_with_cta_only", Integer),
     Column("answers_in_target_band", Integer),
     Column("long_passages_over_250w", Integer),
     Column("has_tldr_or_summary", Boolean),

@@ -1035,6 +1035,33 @@ reales, los 4 verificados en vivo contra jc antes de darlos por corregidos:
 
 Suite: 633 tests.
 
+### M11 detecta respuestas que son solo CTA de marketing (2026-08-26)
+
+Salió de una auditoría manual del usuario contra jcreparaciones.com (fuera de
+SEO-OS, con un prompt de 8 categorías de problemas que Search Console/Semrush
+no detectan directamente). Hallazgo real: `/por-que-no-carga-mi-celular-cali`
+tiene el H1 "¿por qué no carga mi celular?" y el párrafo siguiente tiene
+texto real (no cae en `question_headings_without_answer`, que exige párrafo
+vacío o frase de relleno tipo "en este artículo veremos...") pero solo
+repite síntomas y empuja WhatsApp — nunca nombra una causa. Una IA no tiene
+nada citable ahí, y M11 no lo veía.
+
+Se agregó `question_headings_answered_with_cta_only` a
+`_analyze_answer_extractability()` (`backend/collectors/crawler.py`): cuenta
+encabezados-pregunta cuya respuesta contiene una frase de llamado a la acción
+(cotización, escríbenos, whatsapp, agenda tu cita, etc.) SIN ningún número
+(precio, tiempo, cifra) al lado — el gate del número es lo que evita marcar
+como problema un párrafo que sí cotiza o da un dato concreto junto al CTA.
+Contador separado de `without_answer` (mismo patrón que M11/M12 siempre): el
+fix es distinto — no es quitar el CTA, es agregar el dato que falta.
+
+Verificado en vivo contra jc: `/por-que-no-carga-mi-celular-cali` →
+`question_headings_answered_with_cta_only: 1` (el hallazgo real de la
+auditoría manual), `/celular-mojado-cali` (que sí usa un bloque "Respuesta
+corta:") → 1 de 11 preguntas, proporción mucho más sana.
+
+Suite: 635 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

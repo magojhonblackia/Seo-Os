@@ -474,6 +474,7 @@ async def test_reporte_incluye_extractabilidad_y_densidad_de_datos():
                 project_id=project["id"], url="https://reporte-test.com/preguntas",
                 first_seen=now_iso(), word_count=800,
                 question_headings_count=5, question_headings_without_answer=2,
+                question_headings_answered_with_cta_only=1,
                 answers_in_target_band=1, long_passages_over_250w=1, has_tldr_or_summary=False,
                 numeric_density_per_100w=4.5, passages_30w_plus_without_numbers=2,
                 original_data_signal=True, vague_authority_claims_count=1,
@@ -490,7 +491,7 @@ async def test_reporte_incluye_extractabilidad_y_densidad_de_datos():
     idx = html.find("reporte-test.com/preguntas", section_idx)
     assert idx != -1
     row = html[idx:idx + 400]
-    assert "5 (2)" in row       # 5 preguntas, 2 sin respuesta
+    assert "5 (2 / 1)" in row   # 5 preguntas, 2 sin respuesta, 1 solo CTA
     assert "4.5" in row         # densidad numérica
     assert "✅ coincide" in row  # schema y header coinciden (mismo 2026-08-01)
 
