@@ -241,3 +241,93 @@ def test_api_dashboard_ai_visibility_deduplica_por_proveedor_y_prompt():
     body = response.json()
     assert len(body["checks"]) == 1
     assert body["checks"][0]["response_text"] == "respuesta nueva"
+
+
+# ---------- Issues accionables (§ mejoras 2026-08-23) ----------
+
+def test_build_ai_visibility_issues_cero_menciones_genera_issue():
+    from backend.analyzers.ai_visibility import build_ai_visibility_issues
+
+    checks = [
+        {"prompt_type": "category", "mentions_business": False},
+        {"prompt_type": "category", "mentions_business": False},
+        {"prompt_type": "brand", "mentions_business": None},  # ignorado, no es señal
+    ]
+    issues = build_ai_visibility_issues(checks)
+    assert len(issues) == 1
+    assert issues[0].category == "ai_visibility"
+    assert "2 pregunta" in issues[0].title
+    assert "no lo entrena" in issues[0].suggested  # nunca promete causalidad
+
+
+def test_build_ai_visibility_issues_con_al_menos_una_mencion_no_genera_issue():
+    from backend.analyzers.ai_visibility import build_ai_visibility_issues
+
+    checks = [
+        {"prompt_type": "category", "mentions_business": False},
+        {"prompt_type": "category", "mentions_business": True},
+    ]
+    assert build_ai_visibility_issues(checks) == []
+
+
+def test_build_ai_visibility_issues_sin_preguntas_de_categoria_no_opina():
+    from backend.analyzers.ai_visibility import build_ai_visibility_issues
+
+    checks = [{"prompt_type": "brand", "mentions_business": None}]
+    assert build_ai_visibility_issues(checks) == []
+
+
+def test_run_sin_menciones_crea_issue_real_en_el_action_plan():
+    """Pedido del usuario: 'medir cómo nos ve la IA para alimentarla mejor' —
+    0% de menciones en las preguntas de categoría reales debe aparecer como
+    issue accionable, no solo como texto crudo en la tab GEO."""
+    from backend.db.schema import issues as issues_table
+
+    project = _make_project("test-aiv-issue-real")
+    _add_gsc_query(project.id, "reparacion de celulares cali", 40)
+
+    with patch("backend.collectors.ai_visibility._configured_providers", return_value={"deepseek": "fake-key"}), \
+         patch.dict(ai_visibility._PROVIDERS, {"deepseek": lambda k, p: "No conozco ese negocio."}):
+        run_ai_visibility_collector("test-aiv-issue-real")
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            select(issues_table.c.title, issues_table.c.status)
+            .where(issues_table.c.project_id == project.id, issues_table.c.category == "ai_visibility")
+        ).all()
+    assert len(rows) == 1
+    assert rows[0].status == "open"
+
+
+def test_run_dos_veces_no_duplica_y_cierra_si_luego_hay_mencion():
+    """Idempotencia (regla S5) + reconciliación: correr dos veces con el mismo
+    resultado no duplica la issue; si una corrida posterior sí trae una
+    mención real, la issue vieja se cierra sola (status='resolved')."""
+    from backend.db.schema import issues as issues_table
+
+    project = _make_project("test-aiv-issue-idempotente")
+    _add_gsc_query(project.id, "reparacion de celulares cali", 40)
+
+    with patch("backend.collectors.ai_visibility._configured_providers", return_value={"deepseek": "fake-key"}), \
+         patch.dict(ai_visibility._PROVIDERS, {"deepseek": lambda k, p: "No conozco ese negocio."}):
+        run_ai_visibility_collector("test-aiv-issue-idempotente")
+        run_ai_visibility_collector("test-aiv-issue-idempotente")
+
+    with get_connection() as conn:
+        open_rows = conn.execute(
+            select(issues_table.c.id)
+            .where(issues_table.c.project_id == project.id, issues_table.c.category == "ai_visibility",
+                   issues_table.c.status == "open")
+        ).all()
+    assert len(open_rows) == 1  # no se duplicó
+
+    with patch("backend.collectors.ai_visibility._configured_providers", return_value={"deepseek": "fake-key"}), \
+         patch.dict(ai_visibility._PROVIDERS, {"deepseek": lambda k, p: "Te recomiendo JC Reparaciones."}):
+        run_ai_visibility_collector("test-aiv-issue-idempotente")
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            select(issues_table.c.status)
+            .where(issues_table.c.project_id == project.id, issues_table.c.category == "ai_visibility")
+        ).all()
+    assert all(r.status == "resolved" for r in rows)  # ya no hay ninguna abierta

@@ -53,7 +53,9 @@ MAX_CATEGORY_PROMPTS = 3
 # Modelos elegidos por costo/velocidad — esto es una verificación de
 # visibilidad puntual, no una conversación larga, así que se usa el modelo
 # más barato/rápido razonable de cada proveedor.
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-3.6-flash"  # § bug real 2026-08-23: "gemini-2.0-flash" fue retirado
+# por Google — su propia API lo dijo en el error 404 ("no longer available... use
+# models/gemini-3.6-flash"), verificado en vivo antes de cambiarlo aquí.
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
 ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
@@ -256,6 +258,7 @@ def run_ai_visibility_collector(project_slug: str) -> dict:
     saved = 0
     errors: list[str] = []
     mentions_count = 0
+    fresh_checks: list[dict] = []
 
     with get_connection() as conn:
         for provider_name, api_key in providers.items():
@@ -289,6 +292,7 @@ def run_ai_visibility_collector(project_slug: str) -> dict:
                     )
                 )
                 saved += 1
+                fresh_checks.append({"provider": provider_name, "prompt_type": prompt_type, "mentions_business": mentions})
 
     if saved == 0:
         message = f"Ningún proveedor respondió. Errores: {'; '.join(errors)}"
@@ -303,6 +307,22 @@ def run_ai_visibility_collector(project_slug: str) -> dict:
         "errors": errors,
     }
     snapshot_id = _insert_snapshot(project.id, started, status, None, summary)
+
+    # § mejoras 2026-08-23: issues accionables del Action Plan, no solo texto
+    # crudo — ver backend/analyzers/ai_visibility.py para el límite honesto
+    # de qué SÍ se puede recomendar aquí.
+    from backend.analyzers.ai_visibility import AI_VISIBILITY_OWNED_CATEGORIES, build_ai_visibility_issues
+    from backend.analyzers.issue_store import reconcile_project_issues, record_issue
+
+    found_issues = build_ai_visibility_issues(fresh_checks)
+    with get_connection() as conn:
+        for issue in found_issues:
+            record_issue(conn, project_id=project.id, snapshot_id=snapshot_id, page_id=None, issue=issue, now=now)
+        reconcile_project_issues(
+            conn, project_id=project.id, owned_categories=AI_VISIBILITY_OWNED_CATEGORIES,
+            fresh_keys={(i.category, i.title) for i in found_issues}, now=now,
+        )
+
     return {"snapshot_id": snapshot_id, "status": status, "summary": summary}
 
 

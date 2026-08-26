@@ -43,6 +43,14 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     anthropic_api_key: str = ""
 
+    # DataForSEO (§ mejoras 2026-08-02): backlinks de competencia y, si más
+    # adelante se retoma, geo-grid — evaluado en vivo antes de usarlo (ver
+    # README). Auth por HTTP Basic con login:password (el email de la cuenta
+    # + la API password que genera su dashboard, NO la contraseña normal de
+    # login). Depósito prepago que nunca caduca, no es una key única.
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
+
     # ID numérico de la propiedad GA4 (no el "G-XXXX" de medición). Se puede
     # sobrescribir por proyecto en projects.config["ga4_property_id"] cuando se
     # audita más de un sitio. Usa el MISMO service account que Search Console:
@@ -82,6 +90,12 @@ class Settings(BaseSettings):
     @property
     def has_bing_webmaster(self) -> bool:
         return bool(_resolved("bing_webmaster_api_key", self.bing_webmaster_api_key))
+
+    @property
+    def has_dataforseo(self) -> bool:
+        return bool(_resolved("dataforseo_login", self.dataforseo_login)) and bool(
+            _resolved("dataforseo_password", self.dataforseo_password)
+        )
 
     @property
     def has_telegram(self) -> bool:
@@ -161,6 +175,7 @@ _REDACTED_SECRET_FIELDS = (
     "deepseek_api_key", "pagespeed_api_key", "bing_webmaster_api_key",
     "telegram_bot_token", "serper_api_key", "indexnow_key",
     "gemini_api_key", "anthropic_api_key",
+    "dataforseo_login", "dataforseo_password",
 )
 
 

@@ -893,6 +893,42 @@ jc no se lea como un defecto (su stack Next.js/Vercel no manda ese header).
 
 Suite: 612 tests.
 
+### AI Visibility: de texto crudo a issue accionable en el Action Plan (2026-08-23)
+
+El usuario pidió "una herramienta que permita medir cómo nos está viendo la
+IA para alimentarla mejor" — ya existía (AI Visibility, tab GEO), así que la
+pregunta real era otra: hoy solo muestra la respuesta cruda y si te menciona,
+sin convertir eso en una recomendación como sí hace el resto del software.
+
+Límite honesto que hay que respetar aquí (P1): consultar un LLM no lo
+entrena ni deja rastro — cada llamada es independiente. Así que la issue
+nueva **nunca** afirma que una acción específica "hará que la IA te
+mencione" (esa relación causal no se puede sostener). Lo que sí es honesto:
+señalar el hecho observado (0 menciones reales en las preguntas de
+categoría — solo esas cuentan, brand/comparison no son señal, ver bug de
+2026-07-27) y apuntar a las señales que SÍ están bajo control y que este
+mismo software ya mide: backlinks, NAP/GBP, extraíbilidad de contenido
+(M11/M12). Nunca promete que se moverá la aguja, solo que es lo único
+accionable que existe.
+
+`backend/analyzers/ai_visibility.py` (nuevo) + `record_issue`/
+`reconcile_project_issues` en el collector — mismo patrón que usa
+`opportunities.py` para issues a nivel proyecto (no por página). Idempotente:
+correr dos veces no duplica, y si una corrida posterior sí trae una mención
+real, la issue vieja se cierra sola.
+
+**Bug real encontrado en la verificación en vivo, no relacionado con lo
+anterior**: Gemini empezó a devolver 404 — `gemini-2.0-flash` fue retirado
+por Google (su propia API lo dice: "no longer available... use
+models/gemini-3.6-flash"). Corregido. Verificado de nuevo en vivo: Gemini ya
+responde — y reveló un hallazgo real por su cuenta: confunde a "JC
+Reparaciones" con OTRO negocio del mismo nombre genérico (describe
+reparación de electrodomésticos de línea blanca, no de celulares/
+computadores) — una alucinación real, documentada aquí, no perseguida
+todavía (el prompt de marca no genera issue, por diseño — ver arriba).
+
+Suite: 617 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

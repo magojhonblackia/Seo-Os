@@ -41,6 +41,8 @@ SECRET_FIELDS: dict[str, dict] = {
     "telegram_bot_token": {"label": "Telegram — bot token (alertas)", "category": "alertas"},
     "telegram_chat_id": {"label": "Telegram — chat id (alertas)", "category": "alertas"},
     "ga4_property_id": {"label": "Google Analytics 4 — Property ID", "category": "analytics"},
+    "dataforseo_login": {"label": "DataForSEO — login (tu email de la cuenta)", "category": "backlinks"},
+    "dataforseo_password": {"label": "DataForSEO — API password (no tu contraseña de login)", "category": "backlinks"},
 }
 
 
