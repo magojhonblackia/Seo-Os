@@ -65,18 +65,23 @@ def _fetch_ranked_keywords(
     base_url: str = DATAFORSEO_BASE_URL,
 ) -> tuple[list[dict], str | None]:
     """POST a /dataforseo_labs/google/ranked_keywords/live. Devuelve
-    (keywords, error) — nunca lanza, degrada con mensaje claro (S3)."""
-    body = {
-        "tasks": [
-            {
-                "target": domain,
-                "location_code": location_code,
-                "language_code": language_code,
-                "limit": limit,
-                "order_by": ["ranked_serp_element.serp_item.rank_group,asc"],
-            }
-        ]
-    }
+    (keywords, error) — nunca lanza, degrada con mensaje claro (S3).
+
+    Bug real 2026-08-28, encontrado en vivo contra la cuenta real (no
+    supuesto): el body correcto es un ARRAY plano de tasks (`[{...}]`), NO
+    `{"tasks": [{...}]}` — la documentación (vía WebFetch) sugería lo
+    segundo y daba 40503 "POST Data Is Invalid" incluso con apple.com/US,
+    aislado probando contra /serp/google/organic/live/advanced también. La
+    RESPUESTA sí sigue trayendo la clave "tasks" — solo el request cambia."""
+    body = [
+        {
+            "target": domain,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": limit,
+            "order_by": ["ranked_serp_element.serp_item.rank_group,asc"],
+        }
+    ]
     try:
         with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
             response = client.post(

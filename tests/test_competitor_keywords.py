@@ -115,7 +115,7 @@ def test_fetch_ranked_keywords_envia_target_y_location_code_correctos():
         mock_httpx.HTTPError = Exception
         _fetch_ranked_keywords("user@x.com", "pass", "competidor.com", location_code=2170, language_code="es")
 
-    task = client.last_body["tasks"][0]
+    task = client.last_body[0]  # el body real es un array plano de tasks, no {"tasks": [...]}
     assert task["target"] == "competidor.com"
     assert task["location_code"] == 2170
     assert task["language_code"] == "es"

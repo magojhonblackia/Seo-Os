@@ -1343,6 +1343,37 @@ datos" porque el centro de la grilla no está configurado todavía.
 
 Suite: 705 tests.
 
+### Bug real de formato DataForSEO + primeras corridas reales (2026-08-28)
+
+El usuario instaló su API key real de DataForSEO y pidió probar
+`competitor_keywords`/`geo_grid` en vivo. Falló con `40503 POST Data Is
+Invalid` — diagnosticado en vivo (no adivinado): el body correcto de
+CUALQUIER endpoint de tareas de DataForSEO es un **array plano de tasks**
+(`[{...}]`), no `{"tasks": [{...}]}` como sugería el resumen extraído vía
+WebFetch de su documentación — confirmado aislando el problema contra
+`/serp/google/organic/live/advanced` también, con `apple.com`/Estados
+Unidos, antes de tocar el código. La RESPUESTA sí sigue trayendo la clave
+`"tasks"` — solo el request cambia. Corregido en ambos collectors
+(`competitor_keywords.py` y `geo_grid.py`), tests actualizados.
+
+Primeras corridas reales, ya con el fix:
+- **Ranked Keywords** contra los 4 competidores de jc: `capriservicios.com`
+  (5 gaps reales, incluyendo "soldadura a domicilio" y "soldador cali" —
+  accionables), `myphonedoctor.co` (2 gaps), `serviciotecnicoapplecali.com`
+  (0 keywords rankeadas encontradas), `ifixit.com` (200 keywords, 194
+  "gaps" — pero la mayoría es ruido: "linux tails", "porque mi impresora
+  imprime cortado" — sitio global gigante, no un competidor local
+  comparable. El dato es correcto, la relevancia la decide el humano —
+  mismo criterio del `suggested` de `build_competitor_keyword_issues`).
+- **Geo-grid**: centro de la grilla resuelto con las coordenadas REALES del
+  propio schema `LocalBusiness` de jc (`geo.latitude`/`geo.longitude`,
+  extraídas en vivo, no inventadas) — 3.4615815, -76.5297024. Grilla 3×3,
+  2 keywords: 22.2% de visibilidad en ambas (2 de 9 puntos), posición
+  promedio 3.5-4.5 donde visible.
+
+Suite: 705 tests (sin cambio de conteo — corrección de bug + verificación
+en vivo, no funciones nuevas).
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

@@ -101,16 +101,18 @@ def _fetch_maps_rank(
     zoom: int = DEFAULT_ZOOM, language_code: str = "es", base_url: str = DATAFORSEO_BASE_URL,
 ) -> tuple[dict | None, str | None]:
     """POST a /serp/google/maps/live/advanced en UN punto. Devuelve
-    ({our_position, our_listing_title} | None si no aparece, error)."""
-    body = {
-        "tasks": [
-            {
-                "keyword": keyword,
-                "location_coordinate": f"{lat},{lng},{zoom}z",
-                "language_code": language_code,
-            }
-        ]
-    }
+    ({our_position, our_listing_title} | None si no aparece, error).
+
+    Bug real 2026-08-28, mismo hallazgo que competitor_keywords.py: el body
+    correcto es un ARRAY plano de tasks (`[{...}]`), no `{"tasks": [{...}]}`
+    — verificado en vivo contra la cuenta real, no solo contra la docs."""
+    body = [
+        {
+            "keyword": keyword,
+            "location_coordinate": f"{lat},{lng},{zoom}z",
+            "language_code": language_code,
+        }
+    ]
     try:
         with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
             response = client.post(

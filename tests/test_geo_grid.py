@@ -127,7 +127,7 @@ def test_fetch_maps_rank_envia_location_coordinate_con_formato_correcto():
         mock_httpx.HTTPError = Exception
         _fetch_maps_rank("u", "p", "kw", 3.45, -76.53, "jcreparaciones-test.com", zoom=15)
 
-    task = client.last_body["tasks"][0]
+    task = client.last_body[0]  # el body real es un array plano de tasks, no {"tasks": [...]}
     assert task["location_coordinate"] == "3.45,-76.53,15z"
 
 
