@@ -132,6 +132,7 @@ def test_collector_sin_credenciales_devuelve_skipped():
     _make_project("test-bl-sin-config")
     with patch("backend.collectors.backlinks.settings") as mock_settings:
         mock_settings.has_bing_webmaster = False
+        mock_settings.has_dataforseo = False
         result = run_backlinks_collector("test-bl-sin-config")
 
     assert result["status"] == "skipped"
@@ -184,6 +185,7 @@ def test_collector_bing_persiste_backlinks_reales():
     with patch("backend.collectors.backlinks.settings") as mock_settings, \
          patch("backend.collectors.backlinks.httpx") as mock_httpx:
         mock_settings.has_bing_webmaster = True
+        mock_settings.has_dataforseo = False
         mock_settings.bing_webmaster_api_key = "fake_bing_key"
         mock_httpx.Client.return_value = fake_client
         mock_httpx.HTTPError = Exception
@@ -207,6 +209,7 @@ def test_collector_persiste_idempotente_sin_duplicar():
     with patch("backend.collectors.backlinks.settings") as mock_settings, \
          patch("backend.collectors.backlinks.httpx") as mock_httpx:
         mock_settings.has_bing_webmaster = True
+        mock_settings.has_dataforseo = False
         mock_settings.bing_webmaster_api_key = "fake_bing_key"
         mock_httpx.Client.return_value = _FakeBingClient()
         mock_httpx.HTTPError = Exception
@@ -248,6 +251,7 @@ def test_collector_bing_error_no_rompe_la_app():
     with patch("backend.collectors.backlinks.settings") as mock_settings, \
          patch("backend.collectors.backlinks.httpx") as mock_httpx:
         mock_settings.has_bing_webmaster = True
+        mock_settings.has_dataforseo = False
         mock_settings.bing_webmaster_api_key = "fake_bing_key"
         mock_httpx.Client.return_value = _FakeErrorClient()
         mock_httpx.HTTPError = Exception
@@ -288,6 +292,7 @@ def test_api_collect_backlinks_module_registrado():
     _make_project("test-bl-api-collect")
     with patch("backend.collectors.backlinks.settings") as mock_settings:
         mock_settings.has_bing_webmaster = False
+        mock_settings.has_dataforseo = False
         resp = client.post("/api/collect/backlinks/test-bl-api-collect", json={})
     assert resp.status_code == 200
     assert resp.json()["status"] == "skipped"
@@ -323,6 +328,180 @@ def test_reclaim_no_marca_backlink_a_url_final_correcta():
     bl = bl.__class__(**{**bl.__dict__, "target_url": "https://miproyecto.com/vigente"})
     opps = find_reclaim_opportunities([bl], redirect_map={}, broken_targets=set())
     assert opps == []
+
+
+# ---------- Collector DataForSEO (§ mejoras 2026-08-28, "backlinks para
+# DataForSEO" — segunda fuente además de Bing, mismo contrato de fila) ----------
+
+def _dataforseo_response(items):
+    return {
+        "tasks": [
+            {
+                "status_code": 20000,
+                "status_message": "Ok.",
+                "result": [{"target": "test-backlinks.com", "total_count": len(items), "items": items}],
+            }
+        ]
+    }
+
+
+class _FakeDataForSeoClient:
+    """Mockea la forma REAL de /backlinks/backlinks/live, verificada en vivo
+    contra jcreparaciones.com antes de escribir el parseo (no adivinada) —
+    ver docstring de _fetch_dataforseo_backlinks."""
+
+    def __init__(self, response_json):
+        self._response_json = response_json
+        self.last_body = None
+        self.last_headers = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def post(self, url, headers=None, json=None):
+        self.last_body = json
+        self.last_headers = headers
+        return _FakeResponse(self._response_json)
+
+
+def test_collector_dataforseo_persiste_backlinks_reales():
+    _make_project("test-bl-dfs")
+    items = [
+        {
+            "domain_from": "quotesblom.com",
+            "url_from": "https://quotesblom.com/all/1510/28.html",
+            "url_to": "https://test-backlinks.com/",
+            "anchor": "reparacion de celulares",
+            "dofollow": True,
+            "backlink_spam_score": 60,
+            "domain_from_rank": 126,
+        }
+    ]
+    fake_client = _FakeDataForSeoClient(_dataforseo_response(items))
+    with patch("backend.collectors.backlinks.settings") as mock_settings, \
+         patch("backend.collectors.backlinks.httpx") as mock_httpx, \
+         patch("backend.collectors.backlinks.get_secret", return_value="fake"):
+        mock_settings.has_bing_webmaster = False
+        mock_settings.has_dataforseo = True
+        mock_settings.dataforseo_login = "fake_login"
+        mock_settings.dataforseo_password = "fake_password"
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+
+        result = run_backlinks_collector("test-bl-dfs")
+
+    assert result["status"] == "ok"
+    assert result["summary"]["total_backlinks"] == 1
+    assert "dataforseo" in result["summary"]["sources_used"]
+    # Regresión del bug real de esta sesión (competitor_keywords/geo_grid):
+    # el body correcto es un array plano, NO {"tasks": [...]}.
+    assert isinstance(fake_client.last_body, list)
+    assert fake_client.last_body[0]["target"] == "test-backlinks.com"
+
+    from sqlalchemy import select
+
+    from backend.db.schema import backlinks as backlinks_table, projects as projects_table
+
+    with get_connection() as conn:
+        pid = conn.execute(select(projects_table.c.id).where(projects_table.c.slug == "test-bl-dfs")).scalar()
+        row = conn.execute(select(backlinks_table).where(backlinks_table.c.project_id == pid)).first()
+
+    assert row.source == "dataforseo"
+    assert row.source_domain == "quotesblom.com"
+    assert row.spam_score == 60
+    assert row.domain_authority == 126
+
+
+def test_collector_dataforseo_item_sin_anchor_no_rompe():
+    """Enlaces de imagen traen anchor=null (no solo cuando falta el texto) —
+    verificado en vivo, no adivinado. Debe degradar a "" en vez de reventar."""
+    _make_project("test-bl-dfs-sin-anchor")
+    items = [
+        {
+            "domain_from": "todoservy.com.co",
+            "url_from": "https://todoservy.com.co/perfil-negocio/3469",
+            "url_to": "https://test-backlinks.com/",
+            "anchor": None,
+            "dofollow": True,
+            "backlink_spam_score": 0,
+            "domain_from_rank": 142,
+        }
+    ]
+    fake_client = _FakeDataForSeoClient(_dataforseo_response(items))
+    with patch("backend.collectors.backlinks.settings") as mock_settings, \
+         patch("backend.collectors.backlinks.httpx") as mock_httpx, \
+         patch("backend.collectors.backlinks.get_secret", return_value="fake"):
+        mock_settings.has_bing_webmaster = False
+        mock_settings.has_dataforseo = True
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+
+        result = run_backlinks_collector("test-bl-dfs-sin-anchor")
+
+    assert result["status"] == "ok"
+    assert result["summary"]["total_backlinks"] == 1
+
+
+def test_collector_dataforseo_status_code_error_no_rompe_la_app():
+    _make_project("test-bl-dfs-error")
+    error_response = {"tasks": [{"status_code": 40501, "status_message": "Invalid Field", "result": []}]}
+    fake_client = _FakeDataForSeoClient(error_response)
+    with patch("backend.collectors.backlinks.settings") as mock_settings, \
+         patch("backend.collectors.backlinks.httpx") as mock_httpx, \
+         patch("backend.collectors.backlinks.get_secret", return_value="fake"):
+        mock_settings.has_bing_webmaster = False
+        mock_settings.has_dataforseo = True
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+
+        result = run_backlinks_collector("test-bl-dfs-error")
+
+    assert result["status"] == "error"
+
+
+def test_collector_combina_bing_y_dataforseo_cuando_ambas_configuradas():
+    _make_project("test-bl-ambas")
+
+    class _FakeBothClient:
+        def __init__(self):
+            self._dfs = _FakeDataForSeoClient(_dataforseo_response([
+                {
+                    "domain_from": "quotesblom.com", "url_from": "https://quotesblom.com/x",
+                    "url_to": "https://test-backlinks.com/", "anchor": "reparaciones",
+                    "dofollow": True, "backlink_spam_score": 60, "domain_from_rank": 126,
+                }
+            ]))
+            self._bing = _FakeBingClient()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, params=None):
+            return self._bing.get(url, params=params)
+
+        def post(self, url, headers=None, json=None):
+            return self._dfs.post(url, headers=headers, json=json)
+
+    with patch("backend.collectors.backlinks.settings") as mock_settings, \
+         patch("backend.collectors.backlinks.httpx") as mock_httpx, \
+         patch("backend.collectors.backlinks.get_secret", return_value="fake"):
+        mock_settings.has_bing_webmaster = True
+        mock_settings.has_dataforseo = True
+        mock_settings.bing_webmaster_api_key = "fake_bing_key"
+        mock_httpx.Client.return_value = _FakeBothClient()
+        mock_httpx.HTTPError = Exception
+
+        result = run_backlinks_collector("test-bl-ambas")
+
+    assert result["status"] == "ok"
+    assert set(result["summary"]["sources_used"]) == {"bing", "dataforseo"}
+    assert result["summary"]["total_backlinks"] == 2
 
 
 def test_build_reclaim_issues_separa_roto_de_redirect():

@@ -25,6 +25,40 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Backlinks vía DataForSEO como segunda fuente, mezclada con Bing (2026-08-28)
+
+Pedido del usuario: "backlinks para DataForSEO". El collector de backlinks ya
+tenía diseño multi-fuente desde el principio (regla del proyecto: no atarse
+a una sola API de pago) — DataForSEO se sumó como segunda fuente con el
+mismo contrato de fila (`BacklinkRow`) que Bing Webmaster, en vez de crear
+una tabla/pipeline paralela.
+
+- `backend/collectors/backlinks.py`: nueva `_fetch_dataforseo_backlinks()`
+  contra `/v3/backlinks/backlinks/live` (verificado en vivo contra
+  jcreparaciones.com antes de escribir el parseo — mismo bug real de
+  body-como-array-plano de esta sesión, no `{"tasks": [...]}`).
+- `BacklinksCollector.collect()` corre Bing y DataForSEO en paralelo lógico
+  (cada uno degrada solo si falla, igual que antes) — con solo una de las
+  dos credenciales configuradas sigue funcionando con esa única fuente; solo
+  se salta si NINGUNA está configurada.
+- Cada fila queda etiquetada con su `source` real (columna "Fuente" ya
+  existente en el dashboard) — sin tabla ni pestaña duplicada.
+- **Hallazgo real de la primera corrida en vivo contra jc**: 39 backlinks
+  totales (antes solo Bing daba visibilidad parcial), 8 de ellos (20.5%) con
+  el anchor "High Quality Dofollow Backlinks DA 50 PA 40 Premium PBN Network
+  Service... Buy Backlinks Online Cheap" — un caso de PBN/venta de enlaces
+  obvio a simple vista que el detector heurístico actual (solo TLD) NO
+  marca como tóxico todavía — limitación conocida y ya documentada en
+  `toxic_backlinks.py` (Nivel 2, apagado por defecto), no un bug nuevo.
+- Tests: 4 nuevos en `test_backlinks.py` (parseo real, item sin anchor
+  —null en enlaces de imagen—, status_code de error de DataForSEO, y ambas
+  fuentes combinadas) + 5 tests existentes corregidos para fijar
+  `has_dataforseo=False` explícito (si no, el mock de `settings` sin ese
+  atributo seteado es un MagicMock truthy y el collector intentaba llamar a
+  DataForSEO en tests pensados solo para Bing). Suite: 738 → 742.
+- Verificado en vivo contra jc real (botón "Actualizar backlinks" desde el
+  dashboard): `39 backlinks · 2 tóxicos · fuentes: bing, dataforseo`.
+
 ### Pestaña 🛰️ DataForSEO dedicada — se movieron las 4 secciones a un solo lugar (2026-08-28)
 
 Pedido directo del usuario tras la entrega anterior: las 4 secciones de

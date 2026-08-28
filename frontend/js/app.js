@@ -976,7 +976,7 @@ async function collectBacklinks() {
   const btn = document.getElementById("collect-backlinks-btn");
   const statusEl = document.getElementById("collect-backlinks-status");
   btn.disabled = true;
-  statusEl.textContent = "Consultando Bing Webmaster…";
+  statusEl.textContent = "Consultando Bing Webmaster + DataForSEO (las que estén configuradas)…";
   try {
     const result = await apiFetch(`/api/collect/backlinks/${state.activeSlug}`, {
       method: "POST",
@@ -984,7 +984,7 @@ async function collectBacklinks() {
     });
     if (result.status === "skipped") {
       statusEl.textContent = "";
-      showToast(result.summary?.message || "Backlinks sin configurar (ver .env.example)", "error");
+      showToast(result.summary?.message || "Backlinks sin configurar (ver Configuración)", "error");
     } else {
       const summary = result.summary;
       statusEl.textContent = summary

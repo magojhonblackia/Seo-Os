@@ -1,8 +1,26 @@
-"""Collector de backlinks (§9 Fase 4): Bing Webmaster Tools API.
+"""Collector de backlinks (§9 Fase 4): Bing Webmaster Tools API, + DataForSEO
+Backlinks API como segunda fuente opcional (§ mejoras 2026-08-28, pedido
+directo del usuario: "backlinks para DataForSEO"). El diseño multi-fuente ya
+existía desde el principio (regla del proyecto: no atarse a una sola API de
+pago) — DataForSEO se suma con el mismo contrato de fila que Bing, se mezcla
+en la misma tabla `backlinks`, y cada fila queda etiquetada con su
+`source` real, visible en el dashboard (columna "Fuente").
 
-Degradación elegante (S3): sin credenciales configuradas, el collector
-devuelve status="skipped" con un motivo claro en vez de fallar o inventar
-datos (regla P1).
+Verificado en vivo contra jcreparaciones.com antes de escribir el parseo
+(misma disciplina que competitor_keywords/geo_grid/js_rendering_check/
+ai_overview_check esta sesión): `backlinks/backlinks/live` cobra ~$0.024-
+0.025 por consulta para un sitio con ~40 backlinks — el costo real escala
+con el volumen de backlinks del sitio, no es plano para cualquier dominio.
+El primer backlink real devuelto por la cuenta de jc ya era un caso de
+prueba útil: un dominio "quotesblom.com" con spam_score=60 y título de
+página "Boost your Google rankings with Premium PBN & Link Building" — un
+enlace de PBN real, exactamente el tipo de señal que toxic_backlinks.py
+está diseñado para atrapar.
+
+Degradación elegante (S3): sin NINGUNA credencial configurada (ni Bing ni
+DataForSEO), el collector devuelve status="skipped" con un motivo claro en
+vez de fallar o inventar datos (regla P1). Con solo una de las dos
+configurada, corre igual con esa única fuente.
 
 Nota de honestidad, verificada contra credenciales reales el 2026-07-11 (no
 adivinada — falló en el primer intento y se corrigió con documentación real
@@ -29,6 +47,7 @@ funcionar a costo cero.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
 from urllib.parse import urlparse
@@ -56,6 +75,7 @@ logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 20.0
 BING_BASE_URL = "https://ssl.bing.com/webmaster/api.svc/json"
+DATAFORSEO_BASE_URL = "https://api.dataforseo.com/v3"
 MAX_ROWS_PER_SOURCE = 500  # límite duro: evita respuestas gigantes de dominios muy enlazados
 
 # Categoría que ESTE collector recalcula por completo en cada corrida.
@@ -119,25 +139,93 @@ def _fetch_bing_backlinks(domain: str) -> tuple[list[dict], str | None]:
     return rows, None
 
 
+def _auth_header(login: str, password: str) -> dict:
+    token = base64.b64encode(f"{login}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
+
+
+def _fetch_dataforseo_backlinks(domain: str, login: str, password: str) -> tuple[list[dict], str | None]:
+    """POST a /backlinks/backlinks/live — lista real de backlinks individuales
+    (no el /summary, que solo trae conteos agregados). Body es un ARRAY plano
+    de tasks (mismo bug real de esta sesión que competitor_keywords/geo_grid:
+    `{"tasks": [...]}` da 40503, el body correcto es `[{...}]`).
+
+    Campos reales confirmados en vivo contra jcreparaciones.com (no
+    adivinados de la documentación): `domain_from`/`url_from` (origen),
+    `url_to` (destino), `anchor` (nullable — null en enlaces de imagen, no
+    solo cuando falta el anchor), `dofollow` (bool), `backlink_spam_score`
+    (0-100), `domain_from_rank` (rank propio de DataForSEO, no es Moz DA
+    pero ocupa el mismo rol semántico de "domain_authority" en BacklinkRow)."""
+    body = [{"target": domain, "limit": MAX_ROWS_PER_SOURCE, "mode": "as_is"}]
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT) as client:
+            response = client.post(
+                f"{DATAFORSEO_BASE_URL}/backlinks/backlinks/live",
+                headers=_auth_header(login, password),
+                json=body,
+            )
+            response.raise_for_status()
+            data = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("DataForSEO Backlinks API falló para %s: %s", domain, exc)
+        return [], str(exc)
+
+    tasks = data.get("tasks") or []
+    if not tasks or tasks[0].get("status_code") != 20000:
+        error = (tasks[0].get("status_message") if tasks else None) or "Respuesta inesperada de DataForSEO"
+        return [], error
+
+    results = tasks[0].get("result") or []
+    items = (results[0].get("items") or []) if results else []
+    rows = []
+    for item in items[:MAX_ROWS_PER_SOURCE]:
+        source_url = item.get("url_from") or ""
+        if not source_url:
+            continue
+        rows.append(
+            {
+                "source_url": source_url,
+                "source_domain": (item.get("domain_from") or _domain_of(source_url)).lower().removeprefix("www."),
+                "target_url": item.get("url_to") or f"https://{domain}/",
+                "anchor_text": item.get("anchor") or "",
+                "source": "dataforseo",
+                "domain_authority": item.get("domain_from_rank"),
+                "spam_score": item.get("backlink_spam_score"),
+            }
+        )
+    return rows, None
+
+
 class BacklinksCollector(BaseCollector):
     name = "backlinks"
 
     def collect(self) -> CollectorResult:
         domain = _domain_of(self.project["url"])
-        if not settings.has_bing_webmaster:
+        if not settings.has_bing_webmaster and not settings.has_dataforseo:
             return CollectorResult(
                 status="skipped",
                 raw_data={"rows": [], "sources_used": [], "domain": domain},
-                error_message="Backlinks sin configurar: agrega BING_WEBMASTER_API_KEY en .env (ver .env.example).",
+                error_message=(
+                    "Backlinks sin configurar: agrega BING_WEBMASTER_API_KEY o las credenciales de "
+                    "DataForSEO (Configuración → API keys)."
+                ),
             )
 
         rows: list[dict] = []
         sources_used: list[str] = []
         errors: list[str] = []
 
-        bing_rows, bing_error = _fetch_bing_backlinks(domain)
-        rows.extend(bing_rows)
-        (errors.append(f"bing: {bing_error}") if bing_error else sources_used.append("bing"))
+        if settings.has_bing_webmaster:
+            bing_rows, bing_error = _fetch_bing_backlinks(domain)
+            rows.extend(bing_rows)
+            (errors.append(f"bing: {bing_error}") if bing_error else sources_used.append("bing"))
+
+        if settings.has_dataforseo:
+            login = get_secret("dataforseo_login", settings.dataforseo_login)
+            password = get_secret("dataforseo_password", settings.dataforseo_password)
+            dfs_rows, dfs_error = _fetch_dataforseo_backlinks(domain, login, password)
+            rows.extend(dfs_rows)
+            (errors.append(f"dataforseo: {dfs_error}") if dfs_error else sources_used.append("dataforseo"))
 
         if not sources_used and errors:
             return CollectorResult(
