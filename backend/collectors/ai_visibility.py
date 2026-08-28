@@ -1,6 +1,21 @@
-"""AI Visibility: qué responden Gemini/Claude/DeepSeek EN VIVO cuando se les
-pregunta por el negocio o por su categoría (§ mejoras 2026-07-27, pedido
-explícito del usuario: "probar que es o que muestra la ia de nosotros").
+"""AI Visibility: qué responden Gemini/Claude/DeepSeek/ChatGPT/Perplexity EN
+VIVO cuando se les pregunta por el negocio o por su categoría (§ mejoras
+2026-07-27, pedido explícito del usuario: "probar que es o que muestra la ia
+de nosotros").
+
+ChatGPT y Perplexity (§ mejoras 2026-08-28, pedido del usuario: "ver qué está
+diciendo la IA") se agregaron vía DataForSEO AI Optimization API
+(`ai_optimization/{chat_gpt,perplexity}/llm_responses/live`) en vez de una
+API propia de OpenAI/Perplexity — cierran exactamente el hueco que el
+reporte venía declarando en "Lo que NO medimos todavía" ("no consultamos
+esas dos APIs específicas todavía"). Verificado en vivo contra jc antes de
+escribir el parseo: con `web_search=true`, ChatGPT SÍ citó
+jcreparaciones.com como primera recomendación real para "mejor reparación de
+celulares en Cali" (con URL real de cita, no una URL inventada), y Perplexity
+también la mencionó — ambos con costo real por consulta (~$0.02 ChatGPT
+o4-mini, ~$0.006 Perplexity sonar). Mismo criterio de honestidad que el
+resto del módulo: se reutiliza el texto de respuesta tal cual (que ya trae
+las URLs de cita embebidas en markdown), no una interpretación aparte.
 
 Por qué esto y no un "score de IA" inventado: la GEO section ya medía si los
 BOTS de IA pueden CRAWLEAR el sitio (robots.txt/llms.txt) — eso es acceso, no
@@ -28,13 +43,14 @@ de mayor impresión en GSC (excluyendo las que ya contienen el nombre).
 
 Ético/costo (S3, mismo criterio que rank_tracking/local_rank/question_ideas):
 disparo MANUAL, no entra en la secuencia automática de auditoría — cada
-corrida hace hasta 3 proveedores × N prompts, llamadas reales de pago.
-Un proveedor sin API key configurada se salta con gracia, nunca rompe la
-corrida de los demás (regla S3).
+corrida hace hasta 5 proveedores × N prompts, llamadas reales de pago.
+Un proveedor sin credenciales configuradas se salta con gracia, nunca rompe
+la corrida de los demás (regla S3).
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
 import unicodedata
@@ -61,6 +77,14 @@ ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 DEEPSEEK_MODEL = "deepseek-chat"
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+# ChatGPT/Perplexity vía DataForSEO AI Optimization API — modelos elegidos
+# tras revisar /llm_responses/models EN VIVO contra la cuenta real: "o4-mini"
+# es el más barato de OpenAI con web_search_supported=true (los modelos sin
+# razonamiento no soportan web_search en esta API); "sonar" es el más barato
+# de Perplexity, también con búsqueda web real.
+DATAFORSEO_BASE_URL = "https://api.dataforseo.com/v3"
+CHATGPT_MODEL = "o4-mini"
+PERPLEXITY_MODEL = "sonar"
 
 
 class ProviderError(Exception):
@@ -124,17 +148,84 @@ def _ask_deepseek(api_key: str, prompt: str) -> str:
         raise ProviderError(f"Respuesta de DeepSeek con formato inesperado: {data}") from exc
 
 
+def _dataforseo_auth_header(login: str, password: str) -> dict:
+    token = base64.b64encode(f"{login}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
+
+
+def _ask_via_dataforseo_llm_responses(platform: str, model_name: str, credentials: tuple[str, str], prompt: str) -> str:
+    """POST a /ai_optimization/{platform}/llm_responses/live, con
+    `web_search=true` para que la respuesta traiga citas reales (URLs en el
+    texto vía markdown, verificado en vivo) en vez de solo el conocimiento de
+    entrenamiento del modelo. Body es un ARRAY plano de tasks (mismo patrón
+    de esta sesión: `{"tasks": [...]}` da error, el correcto es `[{...}]`).
+
+    Bug real encontrado en vivo (no de la documentación): con
+    `max_output_tokens` puesto, "o4-mini" devuelve 40501 "Invalid Field" —
+    los modelos de razonamiento de esta API no aceptan ese parámetro, así
+    que NO se manda (se deja el default del proveedor)."""
+    login, password = credentials
+    body = [{
+        "user_prompt": prompt,
+        "model_name": model_name,
+        "web_search": True,
+    }]
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT * 2) as client:  # o4-mini/sonar con web_search tardan >8s reales
+            response = client.post(
+                f"{DATAFORSEO_BASE_URL}/ai_optimization/{platform}/llm_responses/live",
+                headers=_dataforseo_auth_header(login, password),
+                json=body,
+            )
+            response.raise_for_status()
+            data = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise ProviderError(f"DataForSEO ({platform}) falló de red: {exc}") from exc
+
+    tasks = data.get("tasks") or []
+    if not tasks or tasks[0].get("status_code") != 20000:
+        error = (tasks[0].get("status_message") if tasks else None) or "respuesta inesperada"
+        raise ProviderError(f"DataForSEO ({platform}) respondió error: {error}")
+
+    results = tasks[0].get("result") or []
+    items = (results[0].get("items") or []) if results else []
+    texts = [
+        section.get("text") or ""
+        for item in items
+        if item.get("type") == "message"
+        for section in (item.get("sections") or [])
+        if section.get("type") == "text"
+    ]
+    if not texts:
+        raise ProviderError(f"DataForSEO ({platform}): sin texto de respuesta en el JSON ({data})")
+    return "\n".join(texts)
+
+
+def _ask_chat_gpt(credentials: tuple[str, str], prompt: str) -> str:
+    return _ask_via_dataforseo_llm_responses("chat_gpt", CHATGPT_MODEL, credentials, prompt)
+
+
+def _ask_perplexity(credentials: tuple[str, str], prompt: str) -> str:
+    return _ask_via_dataforseo_llm_responses("perplexity", PERPLEXITY_MODEL, credentials, prompt)
+
+
 _PROVIDERS = {
     "gemini": _ask_gemini,
     "claude": _ask_claude,
     "deepseek": _ask_deepseek,
+    "chat_gpt": _ask_chat_gpt,
+    "perplexity": _ask_perplexity,
 }
 
 
-def _configured_providers() -> dict[str, str]:
-    """{proveedor: api_key} solo para los que de verdad tienen key configurada
-    (DB-UI o .env, vía get_secret) — un proveedor sin key se salta con
-    gracia, nunca lanza (S3)."""
+def _configured_providers() -> dict[str, str | tuple[str, str]]:
+    """{proveedor: credencial} solo para los que de verdad tienen credencial
+    configurada (DB-UI o .env, vía get_secret) — un proveedor sin credencial
+    se salta con gracia, nunca lanza (S3). Para gemini/claude/deepseek la
+    credencial es un api_key (str); para chat_gpt/perplexity (vía DataForSEO)
+    es la MISMA credencial compartida de DataForSEO, como tupla (login,
+    password) — no una key propia de OpenAI/Perplexity, esos proveedores
+    nunca se llaman directo."""
     from backend.config import settings
     from backend.settings_store import get_secret
 
@@ -143,11 +234,18 @@ def _configured_providers() -> dict[str, str]:
         "claude": ("anthropic_api_key", settings.anthropic_api_key),
         "deepseek": ("deepseek_api_key", settings.deepseek_api_key),
     }
-    out = {}
+    out: dict[str, str | tuple[str, str]] = {}
     for provider, (field, env_value) in candidates.items():
         key = get_secret(field, env_value)
         if key:
             out[provider] = key
+
+    if settings.has_dataforseo:
+        login = get_secret("dataforseo_login", settings.dataforseo_login)
+        password = get_secret("dataforseo_password", settings.dataforseo_password)
+        out["chat_gpt"] = (login, password)
+        out["perplexity"] = (login, password)
+
     return out
 
 
@@ -273,8 +371,9 @@ def run_ai_visibility_collector(project_slug: str) -> dict:
     providers = _configured_providers()
     if not providers:
         message = (
-            "Ningún proveedor de IA configurado (Gemini/Claude/DeepSeek). "
-            "Agrega al menos una API key en Configuración."
+            "Ningún proveedor de IA configurado (Gemini/Claude/DeepSeek/ChatGPT/Perplexity). "
+            "Agrega al menos una API key (o las credenciales de DataForSEO, que habilitan "
+            "ChatGPT y Perplexity) en Configuración."
         )
         snapshot_id = _insert_snapshot(project.id, started, "skipped", message, None)
         return {"snapshot_id": snapshot_id, "status": "skipped", "summary": None, "message": message}

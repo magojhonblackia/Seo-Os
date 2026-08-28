@@ -13,8 +13,12 @@ from sqlalchemy import insert, select, update
 from backend.collectors import ai_visibility
 from backend.collectors.ai_visibility import (
     ProviderError,
+    _ask_chat_gpt,
+    _ask_perplexity,
+    _ask_via_dataforseo_llm_responses,
     _build_prompts,
     _competitor_tokens,
+    _configured_providers,
     _mentions_business,
     _mentions_competitors,
     _strip_accents,
@@ -428,3 +432,175 @@ def test_build_ai_visibility_competitor_issues_solo_si_el_competidor_gana():
     assert "capriservicios.com" in issues[0].title
     assert "2 de 3" in issues[0].title
     assert "vs tus 1" in issues[0].title
+
+
+# ---------- ChatGPT/Perplexity vía DataForSEO (§ mejoras 2026-08-28, pedido
+# "ver qué está diciendo la IA") — DataForSEO mockeado, sin llamadas reales.
+# Formas de respuesta verificadas EN VIVO contra jcreparaciones.com antes de
+# escribir el parseo (ver docstring de _ask_via_dataforseo_llm_responses). ----------
+
+class _FakeResponse:
+    def __init__(self, json_data, status_code=200):
+        self._json = json_data
+        self.status_code = status_code
+        self.text = str(json_data)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import httpx as _httpx
+            raise _httpx.HTTPStatusError("error", request=None, response=self)
+
+    def json(self):
+        return self._json
+
+
+def _dataforseo_llm_response(text, status_code=20000, status_message="Ok."):
+    return {
+        "tasks": [
+            {
+                "status_code": status_code,
+                "status_message": status_message,
+                "result": [
+                    {
+                        "items": [
+                            {"type": "reasoning", "sections": None},
+                            {"type": "message", "sections": [{"type": "text", "text": text}]},
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+
+class _FakeDataForSeoLlmClient:
+    def __init__(self, response_json):
+        self._response_json = response_json
+        self.last_body = None
+        self.last_url = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def post(self, url, headers=None, json=None):
+        self.last_url = url
+        self.last_body = json
+        return _FakeResponse(self._response_json)
+
+
+def test_ask_via_dataforseo_extrae_texto_de_items_message():
+    fake_client = _FakeDataForSeoLlmClient(_dataforseo_llm_response("JC Reparaciones es la mejor opción en Cali."))
+    with patch("backend.collectors.ai_visibility.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+        text = _ask_via_dataforseo_llm_responses("chat_gpt", "o4-mini", ("login", "pass"), "¿cuál es la mejor?")
+    assert text == "JC Reparaciones es la mejor opción en Cali."
+
+
+def test_ask_via_dataforseo_body_es_array_plano_sin_max_output_tokens():
+    """Regresión de dos bugs reales encontrados en vivo (no de la
+    documentación): (1) el body es un array plano, no {"tasks": [...]}; (2)
+    max_output_tokens rompe con 40501 en modelos de razonamiento, así que
+    nunca se manda."""
+    fake_client = _FakeDataForSeoLlmClient(_dataforseo_llm_response("texto"))
+    with patch("backend.collectors.ai_visibility.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+        _ask_via_dataforseo_llm_responses("perplexity", "sonar", ("login", "pass"), "pregunta")
+
+    assert isinstance(fake_client.last_body, list)
+    assert fake_client.last_body[0]["model_name"] == "sonar"
+    assert fake_client.last_body[0]["web_search"] is True
+    assert "max_output_tokens" not in fake_client.last_body[0]
+    assert fake_client.last_url.endswith("/ai_optimization/perplexity/llm_responses/live")
+
+
+def test_ask_via_dataforseo_status_code_error_lanza_provider_error():
+    fake_client = _FakeDataForSeoLlmClient(_dataforseo_llm_response("", status_code=40501, status_message="Invalid Field"))
+    with patch("backend.collectors.ai_visibility.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+        try:
+            _ask_via_dataforseo_llm_responses("chat_gpt", "o4-mini", ("login", "pass"), "pregunta")
+            assert False, "debía lanzar ProviderError"
+        except ProviderError as exc:
+            assert "Invalid Field" in str(exc)
+
+
+def test_ask_via_dataforseo_sin_items_de_mensaje_lanza_provider_error():
+    """Solo hay items de tipo 'reasoning' (sin 'message') — no debe devolver
+    texto vacío silenciosamente."""
+    response = {
+        "tasks": [{"status_code": 20000, "status_message": "Ok.", "result": [{"items": [{"type": "reasoning", "sections": None}]}]}]
+    }
+    fake_client = _FakeDataForSeoLlmClient(response)
+    with patch("backend.collectors.ai_visibility.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+        try:
+            _ask_via_dataforseo_llm_responses("chat_gpt", "o4-mini", ("login", "pass"), "pregunta")
+            assert False, "debía lanzar ProviderError"
+        except ProviderError:
+            pass
+
+
+def test_ask_chat_gpt_y_ask_perplexity_usan_su_propia_plataforma_y_modelo():
+    fake_client = _FakeDataForSeoLlmClient(_dataforseo_llm_response("respuesta"))
+    with patch("backend.collectors.ai_visibility.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+        _ask_chat_gpt(("login", "pass"), "pregunta")
+    assert "/ai_optimization/chat_gpt/llm_responses/live" in fake_client.last_url
+    assert fake_client.last_body[0]["model_name"] == "o4-mini"
+
+    fake_client2 = _FakeDataForSeoLlmClient(_dataforseo_llm_response("respuesta"))
+    with patch("backend.collectors.ai_visibility.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = fake_client2
+        mock_httpx.HTTPError = Exception
+        _ask_perplexity(("login", "pass"), "pregunta")
+    assert "/ai_optimization/perplexity/llm_responses/live" in fake_client2.last_url
+    assert fake_client2.last_body[0]["model_name"] == "sonar"
+
+
+def test_configured_providers_agrega_chatgpt_y_perplexity_con_dataforseo():
+    # _configured_providers() importa settings/get_secret LOCALMENTE (dentro
+    # de la función), así que se parchea en su módulo de origen, no en
+    # backend.collectors.ai_visibility (donde no existen como atributo).
+    with patch("backend.config.settings") as mock_settings, \
+         patch("backend.settings_store.get_secret", side_effect=lambda field, env: f"fake-{field}"):
+        mock_settings.has_dataforseo = True
+        mock_settings.gemini_api_key = ""
+        mock_settings.anthropic_api_key = ""
+        mock_settings.deepseek_api_key = ""
+        mock_settings.dataforseo_login = "login"
+        mock_settings.dataforseo_password = "password"
+        providers = _configured_providers()
+
+    assert providers["chat_gpt"] == ("fake-dataforseo_login", "fake-dataforseo_password")
+    assert providers["perplexity"] == ("fake-dataforseo_login", "fake-dataforseo_password")
+
+
+def test_configured_providers_sin_dataforseo_no_agrega_chatgpt_ni_perplexity():
+    with patch("backend.config.settings") as mock_settings, \
+         patch("backend.settings_store.get_secret", return_value=""):
+        mock_settings.has_dataforseo = False
+        providers = _configured_providers()
+
+    assert "chat_gpt" not in providers
+    assert "perplexity" not in providers
+
+
+def test_collector_guarda_check_de_chat_gpt():
+    project = _make_project("test-aiv-chatgpt")
+    with patch("backend.collectors.ai_visibility._configured_providers", return_value={"chat_gpt": ("login", "pass")}), \
+         patch.dict(ai_visibility._PROVIDERS, {"chat_gpt": lambda creds, p: "JC Reparaciones aparece como opción recomendada."}):
+        result = run_ai_visibility_collector("test-aiv-chatgpt")
+
+    assert result["status"] == "ok"
+    assert "chat_gpt" in result["summary"]["providers_used"]
+    with get_connection() as conn:
+        row = conn.execute(select(ai_visibility_checks).where(ai_visibility_checks.c.project_id == project.id)).first()
+    assert row.provider == "chat_gpt"

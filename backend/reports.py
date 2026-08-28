@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from sqlalchemy import desc, select
 
 from backend.analyzers.content import _date_only, _http_date_only
+from backend.config import settings as _settings
 from backend.analyzers.opportunities import SCORE_KINDS_LABELS as _SCORE_KINDS_LABELS
 from backend.api.routes_dashboard import (
     get_action_plan,
@@ -422,8 +423,12 @@ async def generate_html_report(project: dict) -> str:
         )
     )
 
-    # ---------- AI Visibility: qué responden Gemini/Claude/DeepSeek EN VIVO ----------
-    _PROVIDER_LABELS = {"gemini": "Gemini", "claude": "Claude", "deepseek": "DeepSeek"}
+    # ---------- AI Visibility: qué responden Gemini/Claude/DeepSeek/ChatGPT/
+    # Perplexity EN VIVO (ChatGPT/Perplexity vía DataForSEO, § 2026-08-28) ----------
+    _PROVIDER_LABELS = {
+        "gemini": "Gemini", "claude": "Claude", "deepseek": "DeepSeek",
+        "chat_gpt": "ChatGPT (vía DataForSEO)", "perplexity": "Perplexity (vía DataForSEO)",
+    }
     _PROMPT_TYPE_LABELS = {"brand": "marca", "category": "categoría", "comparison": "comparación"}
     if ai_visibility.get("empty_reason"):
         ai_visibility_block = f'<p class="muted">{_esc(ai_visibility["empty_reason"])}</p>'
@@ -1094,11 +1099,31 @@ async def generate_html_report(project: dict) -> str:
     # /places, posición real de competidores vía el top-10 de Serper). Un
     # reporte que subestima sus propias capacidades desinforma igual que uno
     # que las exagera — sobre todo porque este texto se pega en una IA.
-    not_available_block = """
+    # § 2026-08-28: ChatGPT/Perplexity dejaron de ser "no medible" — ahora se
+    # consultan vía DataForSEO (ver AI Visibility arriba) cuando esa
+    # credencial está configurada. Este ítem queda condicional a eso, para no
+    # declarar una limitación que ya no es cierta (mismo criterio P1 que el
+    # resto de esta lista: ni exagerar ni subestimar lo que SÍ se mide).
+    _chatgpt_perplexity_item = (
+        '<li><strong>Qué responde ChatGPT (OpenAI) o Perplexity en vivo sobre tu negocio:</strong> '
+        'medido — ver sección AI Visibility arriba (proveedores "ChatGPT (vía DataForSEO)" y '
+        '"Perplexity (vía DataForSEO)"), con búsqueda web real activada, no solo conocimiento de '
+        "entrenamiento del modelo.</li>"
+        if _settings.has_dataforseo
+        else (
+            '<li><strong>Qué responde ChatGPT (OpenAI) o Perplexity en vivo sobre tu negocio:</strong> '
+            "no consultamos esas dos APIs específicas todavía (requiere credenciales de DataForSEO en "
+            "Configuración — con eso configurado, se agregan solas a la sección AI Visibility). Lo que SÍ "
+            "medimos sin esa credencial, consultando la API real, es Gemini/Claude/DeepSeek — ver sección "
+            "AI Visibility arriba. Y para todos los bots (incluidos GPTBot/PerplexityBot), medimos si "
+            "pueden CRAWLEAR el sitio (sección GEO), que es una cosa distinta.</li>"
+        )
+    )
+    not_available_block = f"""
     <ul class="not-available">
       <li><strong>Volumen de búsqueda absoluto:</strong> lo que mostramos (Trends) es interés relativo 0-100, no búsquedas/mes reales. Requiere Google Ads API con cuenta activa o un proveedor de pago — no hay fuente gratuita. Para las keywords donde ya apareces, las impresiones REALES de Search Console son mejor dato que cualquier estimación.</li>
-      <li><strong>Qué responde ChatGPT (OpenAI) o Perplexity en vivo sobre tu negocio:</strong> no consultamos esas dos APIs específicas todavía (no configuradas). Lo que SÍ medimos, consultando la API real, es Gemini/Claude/DeepSeek — ver sección AI Visibility arriba. Y para todos los bots (incluidos GPTBot/PerplexityBot), medimos si pueden CRAWLEAR el sitio (sección GEO), que es una cosa distinta.</li>
-      <li><strong>Backlinks de la competencia:</strong> solo vemos los backlinks propios (Bing Webmaster). Descubrir quién enlaza a un competidor exige un índice de enlaces propio o una herramienta de pago.</li>
+      {_chatgpt_perplexity_item}
+      <li><strong>Backlinks de la competencia:</strong> solo vemos los backlinks propios (Bing Webmaster + DataForSEO Backlinks). Descubrir quién enlaza a un competidor exige un índice de enlaces propio o una herramienta de pago.</li>
       <li><strong>Por qué Google rankea a alguien por encima:</strong> el comparador del top-10 mide diferencias objetivas de las páginas (extensión, schema, autoría), pero la autoridad de dominio, los enlaces entrantes y el comportamiento de usuario no son observables desde fuera — nunca presentamos una diferencia medida como la causa del ranking.</li>
       <li><strong>Citations en directorios locales</strong> (Yelp, Facebook, directorios del sector): requieren APIs externas no configuradas. El rating y el número de reseñas de Google Maps SÍ se miden (sección Local Pack).</li>
     </ul>

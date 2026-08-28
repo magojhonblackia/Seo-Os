@@ -1682,7 +1682,7 @@ async function loadGeo() {
   }
 }
 
-const AI_VISIBILITY_PROVIDER_LABELS = { gemini: "Gemini", claude: "Claude", deepseek: "DeepSeek" };
+const AI_VISIBILITY_PROVIDER_LABELS = { gemini: "Gemini", claude: "Claude", deepseek: "DeepSeek", chat_gpt: "ChatGPT (vía DataForSEO)", perplexity: "Perplexity (vía DataForSEO)" };
 const AI_VISIBILITY_TYPE_LABELS = { brand: "marca", category: "categoría", comparison: "comparación" };
 
 async function loadAiVisibility() {

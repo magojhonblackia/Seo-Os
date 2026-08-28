@@ -25,6 +25,51 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### ChatGPT y Perplexity reales en AI Visibility, vía DataForSEO AI Optimization API (2026-08-28)
+
+Pedido del usuario: "también tenemos que utilizar la herramienta para ver
+qué está diciendo la IA o qué señales tenemos que mandarle a la IA". Cierra
+exactamente el hueco que el reporte venía declarando en "Lo que NO medimos
+todavía": *"Qué responde ChatGPT (OpenAI) o Perplexity en vivo... no
+consultamos esas dos APIs específicas todavía"*.
+
+- Investigado y verificado en vivo ANTES de escribir el parseo (misma
+  disciplina de esta sesión): DataForSEO tiene una API completa,
+  `ai_optimization/{platform}/llm_responses/live`, que consulta ChatGPT,
+  Claude, Gemini y Perplexity de verdad, con `web_search=true` opcional. Se
+  integraron solo ChatGPT y Perplexity (Claude/Gemini ya se consultan
+  directo contra su propia API — habría sido redundante duplicarlos).
+- **Bug real encontrado en vivo, no de la documentación**: con
+  `max_output_tokens` puesto, el modelo de razonamiento "o4-mini" devuelve
+  40501 "Invalid Field" — se corrigió no enviando ese parámetro (se deja el
+  default del proveedor).
+- Integrado en el mismo pipeline de `ai_visibility.py` (no una tabla ni
+  pestaña nueva) — `chat_gpt`/`perplexity` se suman a `_PROVIDERS` con la
+  MISMA credencial de DataForSEO (no hace falta una API key propia de
+  OpenAI/Perplexity), y siguen el mismo contrato `ask(credenciales, prompt)
+  -> texto` que Gemini/Claude/DeepSeek, así que reutilizan TODA la lógica
+  existente: `mentions_business`, comparativo, issues del Action Plan,
+  tabla del dashboard, sección del reporte.
+- El ítem de "Lo que NO medimos todavía" ahora es condicional: dice
+  "medido" cuando DataForSEO está configurado, y mantiene el texto honesto
+  original cuando no lo está.
+- **Hallazgo real de la primera corrida en vivo contra jc**: ChatGPT (con
+  búsqueda web real) conoce el negocio con detalle exacto — fundador,
+  año de fundación (2006), certificación IRP de Apple, dirección física,
+  +15.000 equipos reparados — y cita `jcreparaciones.com` como fuente
+  directa. Perplexity también la menciona. 16 respuestas guardadas en total
+  (gemini + deepseek + chat_gpt + perplexity — claude se saltó con gracia,
+  sin key configurada).
+- Tests: 8 nuevos en `test_ai_visibility.py` (parseo real, regresión del
+  bug de `max_output_tokens`, regresión de body-array-plano, error de
+  status_code, respuesta sin items de mensaje, `_configured_providers` con
+  y sin DataForSEO, corrida completa guardando el provider correcto).
+  Suite: 742 → 750.
+- Costo real observado: ~$0.02/consulta ChatGPT (o4-mini), ~$0.006/consulta
+  Perplexity (sonar) — sigue siendo disparo MANUAL, nunca entra en la
+  auditoría automática (mismo criterio de costo que rank_tracking/
+  local_rank/ai_overview_check).
+
 ### Backlinks vía DataForSEO como segunda fuente, mezclada con Bing (2026-08-28)
 
 Pedido del usuario: "backlinks para DataForSEO". El collector de backlinks ya
