@@ -93,6 +93,10 @@ function wireStaticControls() {
   document.getElementById("local-rank-btn").addEventListener("click", runLocalRank);
   document.getElementById("serp-compare-btn").addEventListener("click", runSerpCompare);
   document.getElementById("collect-coverage-btn").addEventListener("click", collectCoverage);
+  document.getElementById("js-rendering-btn").addEventListener("click", runJsRenderingCheck);
+  document.getElementById("ai-overview-btn").addEventListener("click", runAiOverviewCheck);
+  document.getElementById("geo-grid-btn").addEventListener("click", runGeoGrid);
+  document.getElementById("competitor-kw-btn").addEventListener("click", runCompetitorKeywordGaps);
 
   document.getElementById("open-new-project").addEventListener("click", () => {
     document.getElementById("new-project-error").textContent = "";
@@ -180,6 +184,10 @@ async function loadAll() {
     loadScorecards(), loadRankings(), loadTechnical(), loadGeo(), loadAiVisibility(), loadContent(), loadScoresEvolution(),
     loadKeywords(), loadCompetitors(), loadRankTracking(), loadSerpAnalysis(), loadBacklinks(), loadLocalSeo(), loadLocalPack(), loadKeywordIdeas(), loadQuestionIdeas(), loadPagespeed(),
     loadIndexation(), loadSiteHealth(), loadGa4(),
+    // § 2026-08-28: los 4 collectors de DataForSEO (competitor_keywords, geo_grid,
+    // js_rendering_check, ai_overview_check) tenían datos reales guardados pero
+    // solo se veían dentro del reporte HTML largo — sin vista propia en el dashboard.
+    loadJsRenderingCheck(), loadAiOverviewCheck(), loadGeoGrid(), loadCompetitorKeywordGaps(),
   ]);
 }
 
@@ -699,6 +707,75 @@ async function loadCompetitors() {
   }
 }
 
+// § 2026-08-28: competitor_keywords/geo_grid/js_rendering_check/ai_overview_check
+// (4 collectors de DataForSEO) tenían datos reales guardados desde antes, pero
+// solo se veían dentro del reporte HTML largo — no había forma de consultarlos
+// ni verlos desde el dashboard. Bug real reportado por el usuario.
+async function loadCompetitorKeywordGaps() {
+  const container = document.getElementById("competitor-kw-results");
+  try {
+    const data = await apiFetch(`/api/dashboard/${state.activeSlug}/competitor-keywords`);
+    if (data.empty_reason) {
+      container.innerHTML = `<div class="empty-state">${escapeHtml(data.empty_reason)}</div>`;
+      return;
+    }
+    container.innerHTML = data.domains
+      .map((d) => {
+        if (!d.available) {
+          return `<div class="empty-state">${escapeHtml(d.domain)}: ${escapeHtml(d.reason || "sin datos")}</div>`;
+        }
+        if (!d.gaps.length) {
+          return `<div class="empty-state">${escapeHtml(d.domain)}: ${d.keywords_found} keyword(s) rankeada(s) consultadas, sin gaps reales por encima del volumen mínimo.</div>`;
+        }
+        const rows = d.gaps
+          .slice(0, 30)
+          .map((g) => `<tr><td>${escapeHtml(g.keyword)}</td><td>#${g.position ?? "—"}</td><td>${g.search_volume ?? "—"}</td></tr>`)
+          .join("");
+        return `
+          <div class="issue-group">
+            <h3>${escapeHtml(d.domain)} — ${d.gaps.length} gap(s) real(es) de ${d.keywords_found} keyword(s) consultadas</h3>
+            <div class="table-wrapper"><table><thead><tr><th>Keyword</th><th>Su posición</th><th>Volumen/mes</th></tr></thead><tbody>${rows}</tbody></table></div>
+          </div>
+        `;
+      })
+      .join("");
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
+    showToast(`Keyword gaps: ${err.message}`, "error");
+  }
+}
+
+async function runCompetitorKeywordGaps() {
+  const btn = document.getElementById("competitor-kw-btn");
+  const statusEl = document.getElementById("competitor-kw-status");
+  const locationCode = document.getElementById("competitor-kw-location").value.trim();
+  if (!locationCode) {
+    showToast("Falta location_code (ej: 2170 = Colombia) — nunca se adivina", "error");
+    return;
+  }
+  btn.disabled = true;
+  statusEl.textContent = "Consultando keywords rankeadas de todos los competidores (DataForSEO Labs, cuesta cupo real)…";
+  try {
+    const result = await apiFetch(`/api/collect/competitor_keywords/${state.activeSlug}`, {
+      method: "POST",
+      body: JSON.stringify({ location_code: Number(locationCode) }),
+    });
+    if (result.status === "error" || result.status === "skipped") {
+      statusEl.textContent = "";
+      showToast(`Keyword gaps: ${result.summary?.message || "no se pudo consultar"}`, "error");
+    } else {
+      statusEl.textContent = "Consulta completada.";
+      showToast("Keyword gaps actualizados", "success");
+      await loadCompetitorKeywordGaps();
+    }
+  } catch (err) {
+    statusEl.textContent = "";
+    showToast(`Keyword gaps: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function scanSelectedCompetitor() {
   const select = document.getElementById("competitor-selector");
   const domain = select.value;
@@ -1165,6 +1242,66 @@ async function runLocalRank() {
   }
 }
 
+async function loadGeoGrid() {
+  const container = document.getElementById("geo-grid-table");
+  try {
+    const data = await apiFetch(`/api/dashboard/${state.activeSlug}/geo-grid`);
+    if (data.empty_reason) {
+      container.innerHTML = `<div class="empty-state">${escapeHtml(data.empty_reason)}</div>`;
+      return;
+    }
+    renderTable(
+      container,
+      [
+        { key: "keyword", label: "Keyword" },
+        { key: "visibility_pct", label: "Visibilidad en la grilla", render: (r) => `${r.visibility_pct}% (${r.points.filter((p) => p.our_position != null).length}/${r.grid_points} puntos)` },
+        { key: "avg_position_where_visible", label: "Posición prom. (donde visible)", mono: true, render: (r) => r.avg_position_where_visible ?? "—" },
+      ],
+      data.keywords,
+      "Sin datos aún"
+    );
+    const dateNote = document.createElement("p");
+    dateNote.className = "compare-range";
+    dateNote.textContent = `Última grilla: ${data.date}`;
+    container.prepend(dateNote);
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function runGeoGrid() {
+  const btn = document.getElementById("geo-grid-btn");
+  const statusEl = document.getElementById("geo-grid-status");
+  const keywordsInput = document.getElementById("geo-grid-keywords").value.trim();
+  if (!keywordsInput) {
+    showToast("Escribe al menos una keyword para correr la grilla", "error");
+    return;
+  }
+  const keywords = keywordsInput.split(",").map((k) => k.trim()).filter(Boolean);
+
+  btn.disabled = true;
+  statusEl.textContent = `Corriendo grilla para ${keywords.length} keyword(s) (DataForSEO Maps SERP, cuesta cupo real por punto)…`;
+  try {
+    const result = await apiFetch(`/api/collect/geo_grid/${state.activeSlug}`, {
+      method: "POST",
+      body: JSON.stringify({ keywords }),
+    });
+    if (result.status === "error" || result.status === "skipped") {
+      statusEl.textContent = "";
+      showToast(`Geo-grid: ${result.summary?.message || "no se pudo correr"}`, "error");
+    } else {
+      statusEl.textContent = "Grilla completada.";
+      showToast("Geo-grid actualizado", "success");
+      await loadGeoGrid();
+    }
+  } catch (err) {
+    statusEl.textContent = "";
+    showToast(`Geo-grid: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function collectLocalSeo() {
   const btn = document.getElementById("collect-local-btn");
   const statusEl = document.getElementById("collect-local-status");
@@ -1412,6 +1549,64 @@ async function loadTechnical() {
   }
 }
 
+async function loadJsRenderingCheck() {
+  const container = document.getElementById("js-rendering-table");
+  try {
+    const data = await apiFetch(`/api/dashboard/${state.activeSlug}/js-rendering-check`);
+    if (!data.available) {
+      container.innerHTML = `<div class="empty-state">${escapeHtml(data.empty_reason)}</div>`;
+      return;
+    }
+    renderTable(
+      container,
+      [
+        { key: "url", label: "Página", render: (r) => `<span title="${escapeHtml(r.url)}">${escapeHtml(shortenUrl(r.url))}</span>` },
+        { key: "raw_word_count", label: "Palabras (crudo)", mono: true },
+        { key: "rendered_word_count", label: "Palabras (renderizado)", mono: true },
+        { key: "gap_pct", label: "Diferencia", mono: true, render: (r) => (r.gap_pct != null ? `${r.gap_pct}%` : "—") },
+        { key: "title_matches", label: "Title coincide", render: (r) => (r.title_matches ? "✅" : "🔴") },
+      ],
+      data.results,
+      "Sin comparaciones aún"
+    );
+    const dateNote = document.createElement("p");
+    dateNote.className = "compare-range";
+    dateNote.textContent = `Última comparación: ${data.checked_at} — solo cuenta hallazgo cuando lo renderizado trae MÁS contenido.`;
+    container.prepend(dateNote);
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function runJsRenderingCheck() {
+  const btn = document.getElementById("js-rendering-btn");
+  const statusEl = document.getElementById("js-rendering-status");
+  const urlsInput = document.getElementById("js-rendering-urls").value.trim();
+  const urls = urlsInput ? urlsInput.split(",").map((u) => u.trim()).filter(Boolean) : null;
+
+  btn.disabled = true;
+  statusEl.textContent = "Comparando renderizado con JS (DataForSEO On-Page, cuesta cupo real por página)…";
+  try {
+    const result = await apiFetch(`/api/collect/js_rendering_check/${state.activeSlug}`, {
+      method: "POST",
+      body: JSON.stringify({ urls }),
+    });
+    if (result.status === "error" || result.status === "skipped") {
+      statusEl.textContent = "";
+      showToast(`Renderizado: ${result.summary?.message || "no se pudo comparar"}`, "error");
+    } else {
+      statusEl.textContent = "Comparación completada.";
+      showToast("Comparación de renderizado actualizada", "success");
+      await loadJsRenderingCheck();
+    }
+  } catch (err) {
+    statusEl.textContent = "";
+    showToast(`Renderizado: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 const _SEM_LABEL = { green: "OK", yellow: "REVISAR", red: "FALTA" };
 const _TECHNICAL_FIELDS = [
   ["title", "Title"],
@@ -1552,6 +1747,75 @@ async function runAiVisibility() {
   } catch (err) {
     statusEl.textContent = "";
     showToast(`AI Visibility: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadAiOverviewCheck() {
+  const container = document.getElementById("ai-overview-table");
+  try {
+    const data = await apiFetch(`/api/dashboard/${state.activeSlug}/ai-overview-check`);
+    if (!data.available) {
+      container.innerHTML = `<div class="empty-state">${escapeHtml(data.empty_reason)}</div>`;
+      return;
+    }
+    renderTable(
+      container,
+      [
+        { key: "keyword", label: "Keyword" },
+        { key: "has_ai_overview", label: "¿Tiene AI Overview?", render: (r) => (r.has_ai_overview ? "✅" : "—") },
+        { key: "brand_cited", label: "¿Te cita?", render: (r) => (!r.has_ai_overview ? '<span style="color:var(--text-muted);">—</span>' : r.brand_cited ? "✅" : "🔴 no") },
+        {
+          key: "references", label: "Fuentes citadas",
+          render: (r) => (r.has_ai_overview ? escapeHtml((r.references || []).slice(0, 5).map((ref) => ref.source || "").join(", ")) : '<span style="color:var(--text-muted);">—</span>'),
+        },
+      ],
+      data.results,
+      "Sin consultas aún"
+    );
+    const dateNote = document.createElement("p");
+    dateNote.className = "compare-range";
+    dateNote.textContent = `Última consulta: ${data.checked_at} — el dominio real de cada fuente no está disponible en esta API (siempre viene como "google.com").`;
+    container.prepend(dateNote);
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function runAiOverviewCheck() {
+  const btn = document.getElementById("ai-overview-btn");
+  const statusEl = document.getElementById("ai-overview-status");
+  const keywordsInput = document.getElementById("ai-overview-keywords").value.trim();
+  const locationCode = document.getElementById("ai-overview-location").value.trim();
+  if (!keywordsInput) {
+    showToast("Escribe al menos una keyword", "error");
+    return;
+  }
+  if (!locationCode) {
+    showToast("Falta location_code (ej: 2170 = Colombia) — nunca se adivina", "error");
+    return;
+  }
+  const keywords = keywordsInput.split(",").map((k) => k.trim()).filter(Boolean);
+
+  btn.disabled = true;
+  statusEl.textContent = `Consultando AI Overview real para ${keywords.length} keyword(s) (DataForSEO, cuesta cupo real)…`;
+  try {
+    const result = await apiFetch(`/api/collect/ai_overview_check/${state.activeSlug}`, {
+      method: "POST",
+      body: JSON.stringify({ keywords, location_code: Number(locationCode) }),
+    });
+    if (result.status === "error" || result.status === "skipped") {
+      statusEl.textContent = "";
+      showToast(`AI Overview: ${result.summary?.message || "no se pudo consultar"}`, "error");
+    } else {
+      statusEl.textContent = "Consulta completada.";
+      showToast("AI Overview actualizado", "success");
+      await loadAiOverviewCheck();
+    }
+  } catch (err) {
+    statusEl.textContent = "";
+    showToast(`AI Overview: ${err.message}`, "error");
   } finally {
     btn.disabled = false;
   }

@@ -25,6 +25,37 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Vista en el dashboard para los 4 collectors de DataForSEO que solo vivían en el reporte (2026-08-28)
+
+Bug real reportado por el usuario ("los datos de DataForSEO no se visualizan"):
+`competitor_keywords`, `geo_grid`, `js_rendering_check` y `ai_overview_check`
+ya tenían datos reales guardados (verificado con jc: geo-grid con 2 keywords
+al 22.2% de visibilidad, AI Overview con 1/2 keywords activando Overview
+real, etc.), pero la ÚNICA forma de verlos era abrir el reporte HTML largo —
+no existía ni un botón para dispararlos ni una tabla para leerlos desde el
+dashboard mismo.
+
+- **Técnico**: nueva sección "Crawler propio vs renderizado con JS" con
+  input de URLs opcional + botón, justo debajo de la tabla del semáforo.
+- **GEO**: nueva sección "AI Overview real de Google" con input de keywords
+  + `location_code` + botón, debajo de AI Visibility.
+- **Local**: nueva sección "Geo-grid rank tracking" con input de keywords +
+  botón, debajo del Local Pack.
+- **Competidores**: nueva sección "Gap real de keywords vs competidor
+  (DataForSEO Labs)" con input de `location_code` + botón, debajo del
+  Keyword Gap de texto existente — aclarado en el propio texto de la UI que
+  es un dato distinto (ranking real vs comparación de título/H1).
+- Los 4 se cargan automáticamente en `loadAll()` igual que el resto del
+  dashboard, y cada uno tiene su propio botón de disparo manual porque los 4
+  cuestan cupo real de DataForSEO por consulta (mismo criterio que
+  rank_tracking/local_rank/serp_compare: nunca se disparan solos en la
+  auditoría automática).
+- Verificado en vivo contra `jcreparaciones.com` real (servidor levantado,
+  las 4 tablas muestran datos reales, sin errores de consola).
+- `security_headers`/`indexnow` quedan con el mismo problema (solo viven en
+  el reporte) — no se tocaron en este cambio, el pedido fue específicamente
+  sobre "datos de DataForSEO".
+
 ### Reporte HTML dividido en 34 secciones copiables por separado (2026-08-28)
 
 Bug real reportado por el usuario: el reporte HTML había crecido a ~880KB de
