@@ -166,6 +166,12 @@ def _extract_schema_nodes(soup: BeautifulSoup) -> list[dict]:
                     {
                         "types": [t for t in (types if isinstance(types, list) else [types]) if isinstance(t, str)],
                         "fields": _schema_field_paths(node),
+                        # § mejoras 2026-08-28: permite mergear por @id en
+                        # schema_validation.py — un LocalBusiness puede venir
+                        # partido en 2 <script> distintos que comparten @id
+                        # (layout.tsx declara el nodo completo, page.tsx solo
+                        # agrega un campo más), patrón válido de JSON-LD.
+                        "id": node.get("@id") if isinstance(node.get("@id"), str) else None,
                     }
                 )
     return nodes

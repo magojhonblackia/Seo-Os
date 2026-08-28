@@ -109,6 +109,29 @@ def _group_by_type(items: list[dict], field_key: str) -> list[dict]:
     return groups
 
 
+def _merge_nodes_by_id(nodes: list[dict]) -> list[dict]:
+    """Google mergea nodos JSON-LD que comparten @id — un patrón real y
+    válido para no repetir un nodo completo en cada <script> de la página
+    (ej. layout.tsx declara el LocalBusiness completo con address, page.tsx
+    solo agrega reviews al mismo @id sin redeclarar todo). Sin este merge,
+    cada <script> se validaba aislado y un @id partido en 2 bloques se veía
+    "incompleto" (le faltaba address) aunque el conjunto sí lo tuviera —
+    falso positivo real, encontrado en una auditoría manual contra
+    jcreparaciones.com el 2026-08-28 (layout.tsx:101 vs page.tsx:65)."""
+    merged_by_id: dict[str, dict] = {}
+    standalone: list[dict] = []
+    for node in nodes:
+        node_id = node.get("id")
+        if not node_id:
+            standalone.append(node)
+            continue
+        entry = merged_by_id.setdefault(node_id, {"types": set(), "fields": set()})
+        entry["types"] |= set(node.get("types") or [])
+        entry["fields"] |= set(node.get("fields") or [])
+    merged = [{"types": sorted(e["types"]), "fields": sorted(e["fields"])} for e in merged_by_id.values()]
+    return standalone + merged
+
+
 def validate_pages_schema(crawled_pages: list[dict]) -> dict:
     """Agrupa los hallazgos por (tipo, campo faltante) — un template roto
     afecta a decenas de páginas y debe leerse como UN problema, no como 40.
@@ -123,7 +146,7 @@ def validate_pages_schema(crawled_pages: list[dict]) -> dict:
     for page in crawled_pages:
         if page.get("status_code") not in (None, 200):
             continue
-        for node in page.get("schema_nodes") or []:
+        for node in _merge_nodes_by_id(page.get("schema_nodes") or []):
             result = validate_schema_node(node)
             if not result:
                 continue

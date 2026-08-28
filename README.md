@@ -1239,6 +1239,32 @@ que usa el sistema, no un hack por fuera).
 
 Suite: 673 tests.
 
+### Schema JSON-LD partido en varios `<script>` con el mismo @id (2026-08-28)
+
+Segundo hallazgo de la misma sesión de auditoría manual del usuario contra
+jcreparaciones.com. El `LocalBusiness` de la home venía declarado completo
+(con `address`) en un `<script>` de `layout.tsx`, y `page.tsx` agregaba
+`review` en OTRO `<script>` que comparte el mismo `@id`
+(`https://jcreparaciones.com/#business`) sin redeclarar el resto — patrón
+válido de JSON-LD (Google mergea nodos por `@id`, no exige un único bloque).
+`validate_pages_schema()` validaba cada `<script>` aislado, así que el
+bloque de `page.tsx` (solo `name`+`review`) se veía "incompleto" — le
+faltaba `address` — aunque el conjunto real de la página sí lo tuviera.
+
+`_extract_schema_nodes()` ahora captura el `@id` de cada nodo (antes se
+descartaba). `_merge_nodes_by_id()` (nuevo, en `schema_validation.py`)
+combina por unión de `types`/`fields` los nodos que comparten un `@id` no
+vacío ANTES de validar — nodos sin `@id` (o con uno distinto) se validan
+como siempre, el merge nunca puede ocultar un problema real, solo evita
+penalizar el patrón de "un nodo declarado en varios bloques".
+
+Verificado en vivo con un fetch real a la home de jc: ambos nodos traen
+`id: "https://jcreparaciones.com/#business"`, y con el merge
+`incomplete_groups` da `[]` — antes de este fix daba un `LocalBusiness sin
+address` falso.
+
+Suite: 675 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

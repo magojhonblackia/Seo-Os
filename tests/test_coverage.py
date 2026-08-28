@@ -414,6 +414,48 @@ def test_schema_tipo_desconocido_no_se_opina():
     assert validate_schema_node({"types": ["SoftwareApplication"], "fields": ["name"]}) is None
 
 
+def test_schema_mergea_nodos_que_comparten_id_antes_de_validar():
+    """Falso positivo real encontrado en una auditoría manual contra
+    jcreparaciones.com el 2026-08-28: layout.tsx declara el LocalBusiness
+    COMPLETO (con address) en un <script>, y page.tsx agrega solo 'review'
+    al MISMO @id en otro <script> distinto, sin redeclarar todo — patrón
+    válido de JSON-LD, Google mergea por @id. Sin el merge, el bloque de
+    page.tsx se veía "incompleto" (le falta address) aunque el conjunto real
+    de la página sí lo tenga."""
+    from backend.analyzers.schema_validation import validate_pages_schema
+
+    pages = [{
+        "url": "https://x.com/", "status_code": 200,
+        "schema_nodes": [
+            {
+                "types": ["LocalBusiness"],
+                "fields": ["name", "address", "telephone", "openingHoursSpecification",
+                           "priceRange", "geo", "url", "image"],
+                "id": "#business",
+            },
+            {"types": ["LocalBusiness"], "fields": ["review"], "id": "#business"},
+        ],
+    }]
+    assert validate_pages_schema(pages)["incomplete_groups"] == []
+
+
+def test_schema_no_mergea_nodos_sin_id_o_con_id_distinto():
+    """Control: sin @id compartido, cada nodo se valida por separado como
+    antes — el merge NUNCA debe ocultar un problema real."""
+    from backend.analyzers.schema_validation import validate_pages_schema
+
+    pages = [{
+        "url": "https://x.com/", "status_code": 200,
+        "schema_nodes": [
+            {"types": ["LocalBusiness"], "fields": ["name", "address", "telephone"], "id": "#a"},
+            {"types": ["LocalBusiness"], "fields": ["review"], "id": "#b"},  # sin @id compartido: no hereda el address de #a
+        ],
+    }]
+    v = validate_pages_schema(pages)
+    assert len(v["incomplete_groups"]) == 1
+    assert v["incomplete_groups"][0]["missing_required"] == ["address", "name"]
+
+
 def test_nofollow_interno_genera_issue_y_externo_no():
     """§ #6: verificado en jcreparaciones.com — los 14 nofollow de la home son
     100% externos (redes sociales) y NO deben reportarse."""
