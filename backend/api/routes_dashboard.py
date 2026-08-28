@@ -553,6 +553,30 @@ def get_local_pack(project: dict = Depends(get_project_or_404)) -> dict:
     return {"rows": [dict(r._mapping) for r in rows], "date": latest_date}
 
 
+@router.get("/{slug}/ai-overview-check")
+def get_ai_overview_check(project: dict = Depends(get_project_or_404)) -> dict:
+    """AI Overview REAL de Google por keyword (no una llamada directa a un
+    LLM) — última corrida. Disparo manual, ver
+    backend/collectors/ai_overview_check.py."""
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data, snapshots.c.finished_at)
+            .where(snapshots.c.project_id == project["id"], snapshots.c.collector == "ai_overview_check")
+            .order_by(desc(snapshots.c.id))
+            .limit(1)
+        ).first()
+
+    if row is None:
+        return {
+            "available": False,
+            "empty_reason": "Sin consulta todavía — ejecuta 'ai_overview_check' (requiere DataForSEO configurado).",
+        }
+
+    raw = row[0] or {}
+    results = [r for r in (raw.get("results") or []) if "error" not in r]
+    return {"available": True, "checked_at": row[1], "results": results}
+
+
 @router.get("/{slug}/js-rendering-check")
 def get_js_rendering_check(project: dict = Depends(get_project_or_404)) -> dict:
     """Compara el crawler propio (HTML crudo) contra la versión renderizada

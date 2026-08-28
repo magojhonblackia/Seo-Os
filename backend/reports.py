@@ -42,6 +42,7 @@ from backend.api.routes_dashboard import (
     get_indexation,
     get_keywords,
     get_geo_grid,
+    get_ai_overview_check,
     get_js_rendering_check,
     get_local_pack,
     get_local_seo,
@@ -232,6 +233,7 @@ async def generate_html_report(project: dict) -> str:
     local_pack = get_local_pack(project)
     geo_grid = get_geo_grid(project)
     js_rendering_check = get_js_rendering_check(project)
+    ai_overview_check = get_ai_overview_check(project)
     serp_analysis = get_serp_analysis(project)
     pagespeed_data = get_pagespeed(project)
     indexation = get_indexation(project)
@@ -478,6 +480,36 @@ async def generate_html_report(project: dict) -> str:
             "el texto tal cual lo devolvió el modelo en ese momento (puede variar en la próxima corrida).</p>"
             + comparison_block
             + "\n".join(rows_html)
+        )
+
+    # ---------- AI Overview real de Google (§ mejoras 2026-08-28, DataForSEO
+    # SERP load_async_ai_overview) — a diferencia de AI Visibility de arriba
+    # (llamada directa a Gemini/Claude/DeepSeek), esto es el AI Overview REAL
+    # que Google muestra en el SERP, con sus citas reales. ----------
+    if not ai_overview_check.get("available"):
+        ai_overview_block = f'<p class="muted">{_esc(ai_overview_check.get("empty_reason") or "Sin consulta todavía.")}</p>'
+    else:
+        aov_results = ai_overview_check.get("results") or []
+        with_overview = [r for r in aov_results if r.get("has_ai_overview")]
+        ai_overview_block = (
+            f'<p class="muted">Última consulta: {_esc(ai_overview_check.get("checked_at"))}. AI Overview real del '
+            "SERP de Google, no una llamada directa a un LLM — el dominio real de cada fuente no está disponible en "
+            'esta API (siempre viene como "google.com"), así que "¿te cita?" se aproxima por nombre de marca, no '
+            "por dominio.</p>"
+            + f'<p><strong>{len(with_overview)} de {len(aov_results)}</strong> keyword(s) activan un AI Overview real.</p>'
+            + "<table><thead><tr><th>Keyword</th><th>¿Tiene AI Overview?</th><th>¿Te cita?</th><th>Fuentes citadas</th></tr></thead><tbody>"
+            + "".join(
+                f'<tr><td>{_esc(r["keyword"])}</td><td>{"✅" if r["has_ai_overview"] else "—"}</td>'
+                + (
+                    f'<td>{"✅" if r.get("brand_cited") else "🔴 no"}</td>'
+                    f'<td>{_esc(", ".join(ref.get("source") or "" for ref in (r.get("references") or [])[:5]))}</td>'
+                    if r["has_ai_overview"]
+                    else '<td class="muted">—</td><td class="muted">—</td>'
+                )
+                + "</tr>"
+                for r in aov_results
+            )
+            + "</tbody></table>"
         )
 
     # ---------- SEO Local ----------
@@ -1236,6 +1268,9 @@ async def generate_html_report(project: dict) -> str:
 
   <h2>🧠 AI Visibility — qué responden Gemini/Claude/DeepSeek en vivo</h2>
   {ai_visibility_block}
+
+  <h2>🌐 AI Overview real de Google (SERP en vivo)</h2>
+  {ai_overview_block}
 
   <h2>📍 SEO Local</h2>
   {local_block}

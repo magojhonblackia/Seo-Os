@@ -21,6 +21,7 @@ from backend.collectors.competitor import scan_competitor
 from backend.collectors.competitor_keywords import run_competitor_keywords_collector
 from backend.collectors.geo_grid import run_geo_grid_collector
 from backend.collectors.js_rendering_check import run_js_rendering_check
+from backend.collectors.ai_overview_check import run_ai_overview_check
 from backend.collectors import progress as crawl_progress
 from backend.collectors.crawler import run_crawler
 from backend.collectors.geo import run_geo_collector
@@ -52,6 +53,7 @@ _ALLOWED_MODULES = {
     "crawler", "geo", "opportunities", "trends", "trends_related", "competitor", "backlinks", "local", "gsc",
     "pagespeed", "indexation", "rank_tracking", "local_rank", "sitemap", "ga4", "site_health", "security_headers",
     "indexnow", "question_ideas", "ai_visibility", "competitor_keywords", "geo_grid", "js_rendering_check",
+    "ai_overview_check",
 }
 
 
@@ -259,6 +261,29 @@ def trigger_collector(
         # por página (DataForSEO On-Page instant_pages, ver js_rendering_check.py).
         try:
             result = run_js_rendering_check(project["slug"], urls=payload.urls)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "snapshot_id": result.get("snapshot_id"),
+            "status": result["status"],
+            "summary": result.get("summary") or ({"message": result["message"]} if result.get("message") else None),
+        }
+
+    if module == "ai_overview_check":
+        # Disparo manual, no en la secuencia automática — costo real de pago
+        # ($0.002 extra/keyword sobre el SERP base), ver ai_overview_check.py.
+        if not payload.keywords:
+            raise HTTPException(status_code=422, detail="El collector 'ai_overview_check' requiere 'keywords'")
+        if not payload.location_code:
+            raise HTTPException(
+                status_code=422,
+                detail="El collector 'ai_overview_check' requiere 'location_code' (ver docstring del módulo: nunca se adivina).",
+            )
+        try:
+            result = run_ai_overview_check(
+                project["slug"], keywords=payload.keywords,
+                location_code=payload.location_code, language_code=payload.language_code,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {

@@ -1410,6 +1410,40 @@ correctamente "Ningún gap significativo" con los números reales.
 
 Suite: 720 tests.
 
+### AI Overview real de Google, vía SERP `load_async_ai_overview` (2026-08-28)
+
+Cuarta y última función pedida tras revisar el catálogo de DataForSEO
+(prioridad #2 de esa investigación): `ai_visibility.py` ya mide qué
+responden Gemini/Claude/DeepSeek en vivo, pero eso nunca es lo mismo que el
+AI Overview REAL que Google muestra en el SERP — esta señal captura ESE,
+con sus citas reales.
+
+Verificado en vivo con dos keywords reales de jc ANTES de escribir el
+parseo: **"reparacion iphone cali"** no activa ningún AI Overview en este
+momento (dato real, no un error); **"por que mi iphone se calienta"** sí
+trae uno, con `markdown` (texto completo) y `references` (fuentes citadas:
+Apple Support, YouTube, Mundo del móvil, Facebook, MacServiceBcn — ninguna
+es jc).
+
+Límite honesto encontrado en la propia verificación: el campo `domain` de
+cada referencia SIEMPRE viene como `"google.com"` (es un link de
+redirección de Google, no el dominio real de la fuente) — a diferencia de
+`local_rank.py`/`geo_grid.py`/`competitor_keywords.py`, "¿te cita?" no se
+puede verificar por dominio acá. Se aproxima comparando el nombre de marca
+contra `source`/`title` de cada referencia y el texto del propio overview
+— documentado como aproximado, nunca presentado como certeza (misma clase
+de heurística que `_competitor_tokens()` en `ai_visibility.py`).
+
+Issue real solo cuando el AI Overview EXISTE y no cita la marca — nunca
+cuando Google simplemente no activó un AI Overview para esa keyword, eso
+no es un problema del proyecto. Mismo bug de formato de request que los 3
+collectors anteriores (array plano) — corregido desde el primer intento.
+Endpoint + sección en el reporte, verificado end-to-end contra jc: 1 de 2
+keywords activa AI Overview, no cita a jc, issue real creada en el Action
+Plan con las fuentes reales.
+
+Suite: 738 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

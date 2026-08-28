@@ -918,3 +918,45 @@ async def test_reporte_js_rendering_declara_sin_datos():
     section_idx = html.find("Crawler propio vs renderizado con JS")
     assert section_idx != -1
     assert "Sin comparación todavía" in html[section_idx:section_idx + 300]
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_ai_overview_real():
+    """§ mejoras 2026-08-28: AI Overview real de Google (SERP en vivo), no
+    una llamada directa a un LLM. Usa la forma de datos real verificada en
+    vivo contra jc (ver docstring de ai_overview_check.py)."""
+    project = _make_project("test-report-ai-overview")
+    pid = project["id"]
+    with get_connection() as conn:
+        conn.execute(insert(snapshots).values(
+            project_id=pid, collector="ai_overview_check", status="ok",
+            started_at=now_iso(), finished_at=now_iso(),
+            raw_data={"results": [
+                {"keyword": "reparacion iphone cali", "has_ai_overview": False, "brand_cited": False, "references": []},
+                {"keyword": "por que mi iphone se calienta", "has_ai_overview": True, "brand_cited": False,
+                 "references": [{"source": "Apple Support", "title": "x"}, {"source": "MacServiceBcn", "title": "y"}]},
+            ]},
+            created_at=now_iso(),
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-ai-overview"))
+
+    section_idx = html.find("AI Overview real de Google")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 1000]
+    assert "1 de 2" in section
+    assert "por que mi iphone se calienta" in section
+    assert "🔴 no" in section
+    assert "Apple Support" in section and "MacServiceBcn" in section
+
+
+@pytest.mark.asyncio
+async def test_reporte_ai_overview_declara_sin_datos():
+    project = _make_project("test-report-ai-overview-vacio")
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-ai-overview-vacio"))
+
+    section_idx = html.find("AI Overview real de Google")
+    assert section_idx != -1
+    assert "Sin consulta todavía" in html[section_idx:section_idx + 300]
