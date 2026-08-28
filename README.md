@@ -1444,6 +1444,31 @@ Plan con las fuentes reales.
 
 Suite: 738 tests.
 
+### Security headers e IndexNow: sección en el reporte, pero sin forma de generar el dato (2026-08-28)
+
+Pedido del usuario: "revisa que cuando se haga el análisis todo entre en
+el reporte". Auditoría sistemática de los 10 pasos de `AUDIT_STEPS`
+(`frontend/js/app.js`, lo que corre "▶ Ejecutar auditoría") contra cada
+módulo que el backend acepta en `/api/collect/{module}` — encontró que
+`security_headers` e `indexnow` (con sección propia en el reporte desde el
+2026-08-25) **nunca se disparaban desde ningún lado de la UI**: no están en
+`AUDIT_STEPS`, y tampoco tienen un botón manual propio (a diferencia de
+`ai_visibility`/`rank_tracking`/`local_rank`/`competitor`/`backlinks`/
+`question_ideas`/`trends_related`, que sí tienen su botón en su tab, solo
+no corren automático). Solo eran alcanzables llamando la API directo — algo
+que ningún usuario haría. La sección del reporte quedaba "sin análisis
+todavía" para siempre en cualquier proyecto nuevo.
+
+Agregados a `AUDIT_STEPS` (ambos gratis, una sola request rápida —
+`softFail: true` para no frenar el resto de la auditoría si el sitio no
+tiene IndexNow configurado, por ejemplo). Verificado en vivo end-to-end: se
+corrieron los dos vía la API real, y el reporte de jc ya muestra headers de
+seguridad reales (HSTS/CSP/etc.) y un dato honesto nuevo sobre IndexNow:
+"Configurado pero con problema: key file no encontrado" — la key que tiene
+SEO-OS no coincide con la que está publicada en producción.
+
+Suite: 738 tests (sin cambio — fix de frontend, no de lógica Python).
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

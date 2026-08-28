@@ -2022,6 +2022,14 @@ const AUDIT_STEPS = [
   { module: "crawler", label: "Crawleando el sitio", body: { max_pages: 100 }, poll: true },
   { module: "sitemap", label: "Leyendo sitemap.xml", softFail: true },
   { module: "geo", label: "GEO (llms.txt, robots.txt)" },
+  // § mejoras 2026-08-28: security_headers e indexnow ya se analizaban y
+  // tenían sección propia en el reporte, pero nunca se disparaban desde
+  // ningún lado de la UI — solo alcanzables llamando la API directo, cosa
+  // que ningún usuario haría. Ambos son una sola request rápida y gratis,
+  // encajan bien en la secuencia automática (softFail: si el sitio no tiene
+  // IndexNow configurado, por ejemplo, no debe frenar el resto de la auditoría).
+  { module: "security_headers", label: "Headers de seguridad HTTP", softFail: true },
+  { module: "indexnow", label: "IndexNow (¿está publicado el key file?)", softFail: true },
   // § herramientas de mercado 2026-07-24: ahora mide home + top 5 páginas por
   // impresiones GSC (antes solo la home) — cada una tarda 15-30s reales en
   // Google, así que el paso completo puede tardar ~2-3 min, no ~20s.
