@@ -51,8 +51,8 @@ from backend.models.schemas import IssueStatusUpdate
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
-def _rebuild_technical_report(page_row: dict):
-    return analyze_page(page_data_from_stored_row(page_row))
+def _rebuild_technical_report(page_row: dict, noindex_justified_patterns: list[str] | None = None):
+    return analyze_page(page_data_from_stored_row(page_row, noindex_justified_patterns))
 
 
 _CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
@@ -269,7 +269,8 @@ def get_scorecards(project: dict = Depends(get_project_or_404)) -> dict:
         seo_score_delta = _score_delta(conn, pid, "seo")
 
     page_dicts = [dict(p._mapping) for p in page_rows]
-    technical_score = calculate_technical_score(page_dicts)
+    noindex_justified_patterns = (project.get("config") or {}).get("noindex_justified_patterns") or []
+    technical_score = calculate_technical_score(page_dicts, noindex_justified_patterns)
     content_score = calculate_content_score(page_dicts)
     geo_score = geo_latest["value"] if geo_latest else None
     local_score = local_latest["value"] if local_latest else None
@@ -351,6 +352,7 @@ def get_rankings(
 @router.get("/{slug}/technical")
 def get_technical(project: dict = Depends(get_project_or_404)) -> dict:
     pid = project["id"]
+    noindex_justified_patterns = (project.get("config") or {}).get("noindex_justified_patterns") or []
     with get_connection() as conn:
         page_rows = conn.execute(
             select(pages).where(pages.c.project_id == pid).order_by(pages.c.url)
@@ -359,7 +361,7 @@ def get_technical(project: dict = Depends(get_project_or_404)) -> dict:
     result_pages = []
     counts = {"green": 0, "yellow": 0, "red": 0}
     for p in page_rows:
-        report = _rebuild_technical_report(dict(p._mapping))
+        report = _rebuild_technical_report(dict(p._mapping), noindex_justified_patterns)
         for sem in report.row.values():
             counts[sem] += 1
         result_pages.append(

@@ -13,6 +13,8 @@ from backend.analyzers.technical import (
     evaluate_og,
     evaluate_schema,
     evaluate_title,
+    is_noindex_justified,
+    page_data_from_stored_row,
 )
 
 
@@ -279,6 +281,70 @@ def test_indexable_yellow_justificado():
 def test_indexable_red_no_justificado():
     sem, _ = evaluate_indexability(False, False)
     assert sem == "red"
+
+
+# ---------- noindex_justified_patterns (§ mejoras 2026-08-28, fix del bug
+# real: el campo existía desde antes pero nada lo poblaba nunca — ver
+# docstring de is_noindex_justified en technical.py) ----------
+def test_is_noindex_justified_coincide_con_patron():
+    assert is_noindex_justified("https://jc.com/ciudad/pasto", ["/ciudad/*"]) is True
+
+
+def test_is_noindex_justified_no_coincide_con_ningun_patron():
+    assert is_noindex_justified("https://jc.com/blog/articulo", ["/ciudad/*"]) is False
+
+
+def test_is_noindex_justified_sin_patrones_configurados_es_false():
+    """Sin config, el comportamiento es el mismo de antes de este fix: nunca
+    justificado — no un default silencioso que oculte issues reales."""
+    assert is_noindex_justified("https://jc.com/cualquier-url", []) is False
+
+
+def test_is_noindex_justified_usa_solo_el_path_no_el_dominio_completo():
+    """El patrón es sobre el PATH, no la URL completa — para que un patrón
+    simple como "/ciudad/*" funcione sin repetir el dominio."""
+    assert is_noindex_justified("https://jc.com/ciudad/cali?utm=x", ["/ciudad/*"]) is True
+
+
+def test_page_data_from_stored_row_marca_noindex_justified_con_patron():
+    row = {"url": "https://jc.com/ciudad/pasto", "is_indexable": False}
+    page = page_data_from_stored_row(row, ["/ciudad/*"])
+    assert page.noindex_justified is True
+
+
+def test_page_data_from_stored_row_sin_patrones_no_justifica_nada():
+    """Regresión directa del bug real: antes de este fix, noindex_justified
+    SIEMPRE era False sin importar la config — este test falla si alguien
+    revierte el parámetro por accidente."""
+    row = {"url": "https://jc.com/ciudad/pasto", "is_indexable": False}
+    page = page_data_from_stored_row(row)  # sin segundo argumento, como antes
+    assert page.noindex_justified is False
+
+
+def test_page_data_from_stored_row_url_que_no_coincide_no_se_justifica():
+    row = {"url": "https://jc.com/blog/articulo-real", "is_indexable": False}
+    page = page_data_from_stored_row(row, ["/ciudad/*"])
+    assert page.noindex_justified is False
+
+
+def test_analyze_page_noindex_justificado_baja_de_critical_a_medium():
+    """El efecto REAL y observable del fix (no el technical_score, que no
+    distingue amarillo de rojo por diseño — ver test_opportunities.py): el
+    issue de indexabilidad en el Action Plan baja de 'critical' a 'medium'
+    cuando la URL coincide con un patrón justificado. Esto es exactamente lo
+    que estaba mal en jc: 190 issues 'critical' que en realidad eran
+    ciudades sin volumen, noindex a propósito."""
+    row = {"url": "https://jc.com/ciudad/pasto", "is_indexable": False}
+
+    page_sin_justificar = page_data_from_stored_row(row)
+    report_sin_justificar = analyze_page(page_sin_justificar)
+    index_issue_sin = next(i for i in report_sin_justificar.issues if i.category == "index")
+    assert index_issue_sin.severity == "critical"
+
+    page_justificado = page_data_from_stored_row(row, ["/ciudad/*"])
+    report_justificado = analyze_page(page_justificado)
+    index_issue_con = next(i for i in report_justificado.issues if i.category == "index")
+    assert index_issue_con.severity == "medium"
 
 
 # ---------- Bugs conocidos (§5.3.7) ----------

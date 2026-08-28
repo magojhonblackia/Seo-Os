@@ -25,6 +25,81 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Bug real corregido: `noindex_justified` nunca se poblaba (190 issues "critical" que eran noindex a propósito) (2026-08-28)
+
+Otra sesión de Claude auditando el reporte de jc reportó "190 issues críticas
+= todas noindex de ciudades sin volumen — es intencional (mitiga el ~93% de
+duplicado entre plantillas de ciudad), ¿es un falso positivo del Action
+Plan?". Investigación propia: SÍ es un bug real de SEO-OS, no solo un falso
+positivo a ignorar — `PageData.noindex_justified` (en `technical.py`) existe
+desde antes, y `evaluate_indexability()` ya tenía la rama correcta (noindex
+justificado → amarillo "justificado", no rojo) — pero **nada lo poblaba
+nunca**, así que esa rama jamás se activaba y CUALQUIER noindex, incluida
+una decisión de diseño a propósito, salía crítico.
+
+- Nueva `is_noindex_justified(url, patterns)` en `technical.py` — glob
+  simple (`fnmatch`) sobre el PATH de la URL contra
+  `project.config["noindex_justified_patterns"]` (mismo patrón sin-UI que
+  `banned_phrases`/`geo_grid`). Función única compartida — antes iba a
+  quedar duplicada entre el crawler y los otros 3 lugares que reconstruyen
+  `PageData` desde la tabla `pages`.
+- Encontrados y corregidos, por trazar TODOS los consumidores de
+  `page_data_from_stored_row()` (no solo el primero obvio): el propio
+  crawler (`persist_analysis`), `calculate_technical_score()`
+  (`opportunities.py`, 2 call sites: `run_opportunities_analysis` y
+  `routes_dashboard.get_scorecards`), `context.py`
+  (`build_project_context`, usado por el Asistente IA), y
+  `_rebuild_technical_report()` (`routes_dashboard.get_technical`, la
+  pestaña Técnico del dashboard). Sin esto, la pestaña Técnico seguía
+  mostrando rojo aunque el Action Plan ya mostrara la severidad corregida —
+  dos vistas del mismo dato en desacuerdo.
+- **Hallazgo no obvio documentado con test propio**: el `technical_score`
+  (número del SEO Score) NO cambia con este fix — solo cuenta % de celdas
+  VERDES, y ni amarillo (justificado) ni rojo (sin justificar) son verde.
+  El efecto real y observable es la SEVERIDAD del issue en el Action Plan
+  (`critical` → `medium`) y el color de celda en la pestaña Técnico
+  (`red` → `yellow`) — quien toque este código después no debe asumir que
+  el score también sube.
+- `project.config["noindex_justified_patterns"]` de jc, determinado
+  inspeccionando `lib/cities.ts`/`INDEXED_CITY_SLUGS` Y `next.config.js` del
+  repo real de jcreparaciones.com (no adivinado): 5 plantillas de
+  servicio×ciudad marcan `noindex` para cualquier ciudad fuera de
+  `INDEXED_CITY_SLUGS`. **Vuelta real durante la verificación en vivo**: el
+  primer intento asumió que las 5 plantillas usaban el mismo formato de URL
+  con slash (`/reparacion-iphone/{ciudad}`, la carpeta de ruta real en
+  `app/`) — cierto para `reparacion-celulares`, pero `reparacion-iphone`,
+  `reparacion-samsung`, `reparacion-macbook` y `microsoldadura` en realidad
+  se enlazan y se guardan en `pages.url` con GUIÓN
+  (`/reparacion-iphone-{ciudad}`), que `next.config.js` redirige 301 a la
+  ruta con slash — dos formas de URL reales para la misma plantilla. Los
+  patrones finales cubren ambas formas: `/reparacion-celulares/*`,
+  `/reparacion-iphone/*` + `/reparacion-iphone-*`, y así para
+  samsung/macbook/microsoldadura (9 patrones en total). Una URL indexada que
+  calce el glob no se ve afectada: el gate solo entra en juego cuando
+  `is_indexable=False` en primer lugar.
+- **Hallazgo colateral, fuera de alcance de este fix**: 10 de los issues
+  "critical" restantes son páginas con URL en formato guión
+  (`/reparacion-iphone-candelaria-valle`) que YA NO existen en el sitio real
+  (la URL viva es la de slash) — quedaron huérfanas en `pages`/`issues` de
+  un crawl anterior a que el sitio migrara a la ruta con slash, y como el
+  crawler actual ya no las descubre, nunca se reconcilian (la reconciliación
+  solo toca URLs que SÍ aparecen en el crawl más reciente). No es un bug de
+  `noindex_justified` — es que no hay limpieza de páginas huérfanas cuando
+  una URL desaparece del sitio. Anotado para un fix aparte, no corregido
+  aquí (fuera del alcance de "cerrar las 190 críticas falsas").
+- Tests: 11 nuevos (`is_noindex_justified`, `page_data_from_stored_row` con
+  y sin patrones, `analyze_page` bajando de critical a medium, el
+  `technical_score` documentado sin cambio, integración vía
+  `run_opportunities_analysis`, y el endpoint `/technical` mostrando
+  amarillo). Suite: 750 → 761.
+- Re-crawleado jc completo (500 páginas) para reconciliar las 190 issues
+  viejas contra la config real: **68 issues bajaron de critical a medium**
+  (las páginas de ciudad noindex a propósito, ahora correctamente marcadas
+  "justificado"), 258 issues viejas se cerraron por reconciliación normal.
+  Critical abiertas: 190 → 105, de las cuales 95 son issues reales sin
+  relación con este fix (94 de meta description, 1 de H1) y 10 son las
+  páginas huérfanas con URL vieja descritas arriba (no tocadas a propósito).
+
 ### ChatGPT y Perplexity reales en AI Visibility, vía DataForSEO AI Optimization API (2026-08-28)
 
 Pedido del usuario: "también tenemos que utilizar la herramienta para ver

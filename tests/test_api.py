@@ -1,7 +1,10 @@
 """Tests de API: caso feliz, proyecto inexistente (404), input inválido (422)."""
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import insert
 
+from backend.db.database import get_connection, now_iso
+from backend.db.schema import pages, projects
 from backend.main import app
 
 client = TestClient(app)
@@ -112,6 +115,36 @@ def test_technical_devuelve_estado_vacio_si_no_hay_paginas():
     body = resp.json()
     assert body["pages"] == []
     assert "empty_reason" in body
+
+
+def test_technical_respeta_noindex_justified_patterns_del_proyecto():
+    """Regresión del bug real de jc (190 issues 'critical' que en realidad
+    eran noindex a propósito): la pestaña Técnico debe mostrar amarillo
+    ('justificado'), no rojo, para una página que coincide con un patrón de
+    project.config["noindex_justified_patterns"] — consistente con lo que ya
+    hacía el crawler al persistir el Action Plan."""
+    with get_connection() as conn:
+        pid = conn.execute(
+            insert(projects).values(
+                slug="test-api-technical-noindex", name="Test", url="https://test-api-technical.com",
+                gsc_property="sc-domain:test-api-technical.com", country="CO", language="es",
+                competitors=[], is_active=True,
+                config={"noindex_justified_patterns": ["/ciudad/*"]},
+                created_at=now_iso(),
+            )
+        ).inserted_primary_key[0]
+        conn.execute(
+            insert(pages).values(
+                project_id=pid, url="https://test-api-technical.com/ciudad/pasto",
+                first_seen=now_iso(), is_indexable=False,
+            )
+        )
+
+    resp = client.get("/api/dashboard/test-api-technical-noindex/technical")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["pages"][0]["row"]["indexable"] == "yellow"
+    assert "justificado" in body["pages"][0]["row_detail"]["indexable"]
 
 
 def test_action_plan_estructura_por_severidad():

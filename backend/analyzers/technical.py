@@ -6,8 +6,10 @@ lista de MagoIssue (para el Action Plan).
 """
 from __future__ import annotations
 
+import fnmatch
 import re
 from dataclasses import dataclass, field
+from urllib.parse import urlparse
 
 from backend.analyzers.mago import MagoIssue
 
@@ -280,14 +282,47 @@ class TechnicalReport:
     issues: list[MagoIssue]
 
 
-def page_data_from_stored_row(page_row: dict) -> PageData:
+def is_noindex_justified(url: str, patterns: list[str]) -> bool:
+    """¿El PATH de esta URL coincide con algún patrón glob de
+    `project.config["noindex_justified_patterns"]`? (§ mejoras 2026-08-28,
+    hallazgo real de otra sesión auditando jc a mano: `noindex_justified`
+    existía en PageData desde antes pero NADA lo poblaba nunca — así que
+    CUALQUIER página noindex, incluida una decisión de diseño a propósito
+    (ej. jc marca noindex sus ciudades sin volumen real para evitar que
+    Google trate el ~93% de similitud entre plantillas como duplicado — ver
+    lib/cities.ts del propio proyecto, INDEXED_CITY_SLUGS), salía como
+    "critical" en el Action Plan. 190 issues críticas de jc eran TODAS este
+    mismo caso.
+
+    Config por proyecto, mismo patrón que banned_phrases/geo_grid: sin UI,
+    curado a mano por el dueño del proyecto. Patrón glob simple sobre el
+    PATH de la URL (fnmatch), no una regex — más fácil de escribir a mano
+    para alguien no técnico. Función compartida — antes vivía duplicada
+    inline en crawler.py, ahora es la única fuente de verdad para los tres
+    consumidores de PageData (crawler, page_data_from_stored_row, y por
+    tanto calculate_technical_score / _rebuild_technical_report)."""
+    if not patterns:
+        return False
+    url_path = urlparse(url).path or "/"
+    return any(fnmatch.fnmatch(url_path, pattern) for pattern in patterns)
+
+
+def page_data_from_stored_row(page_row: dict, noindex_justified_patterns: list[str] | None = None) -> PageData:
     """Reconstruye un PageData desde una fila ya guardada en la tabla `pages`.
 
     Vive aquí (no en la capa de API) porque es lógica de análisis, no de
     transporte: tanto las rutas del dashboard como opportunities.py la usan
     para recalcular el semáforo sin volver a crawlear (analyze_page es
     determinista, así que `pages` es la única fuente de verdad).
-    """
+
+    `noindex_justified_patterns` opcional (default sin patrones — noindex sin
+    justificar, mismo comportamiento que antes de este fix) para que el
+    semáforo de indexabilidad sea consistente con el que ya calcula el
+    crawler en persist_analysis — sin esto, una página noindex justificada
+    aparecía en amarillo en el Action Plan (recién crawleado) pero en rojo
+    en la pestaña Técnico / el score técnico (reconstruido desde `pages`),
+    una inconsistencia real detectada al trazar todos los consumidores de
+    esta función."""
     return PageData(
         url=page_row["url"],
         title=page_row.get("title"),
@@ -297,6 +332,7 @@ def page_data_from_stored_row(page_row: dict) -> PageData:
         og=page_row.get("og") or {},
         canonical=page_row.get("canonical"),
         is_indexable=bool(page_row.get("is_indexable", True)),
+        noindex_justified=is_noindex_justified(page_row["url"], noindex_justified_patterns or []),
         x_robots_tag=page_row.get("x_robots_tag"),
     )
 

@@ -13,7 +13,7 @@ from backend.analyzers.opportunities import (
     run_opportunities_analysis,
 )
 from backend.db.database import get_connection, now_iso
-from backend.db.schema import gsc_queries, issues, pages, projects
+from backend.db.schema import gsc_queries, issues, pages, projects, scores
 
 
 def test_top10_ctr_zero_detectado():
@@ -74,6 +74,21 @@ def test_technical_score_pagina_perfecta_es_100():
     assert score >= 50  # al menos la mayoría de celdas en verde/amarillo, no todo rojo
 
 
+def test_technical_score_no_distingue_amarillo_de_rojo_por_diseno():
+    """Documenta un comportamiento no obvio, a propósito (no un bug): el
+    technical_score solo cuenta % de celdas VERDES — amarillo (justificado) y
+    rojo (sin justificar) pesan IGUAL en este número, ninguno es verde. El
+    efecto real de noindex_justified_patterns no es este score, es la
+    severidad del issue en el Action Plan (critical -> medium, ver
+    test_analyzers.py) y el color de celda en la pestaña Técnico (ver
+    test_api.py) — este test existe para que quien toque este código no
+    asuma erróneamente que el score también debería cambiar."""
+    page = {"url": "https://x.com/ciudad/pasto", "is_indexable": False}
+    score_sin_patron = calculate_technical_score([page])
+    score_con_patron = calculate_technical_score([page], ["/ciudad/*"])
+    assert score_con_patron == score_sin_patron
+
+
 def test_seo_score_none_si_no_hay_componentes():
     score, components = calculate_seo_score(None, None)
     assert score is None
@@ -126,14 +141,42 @@ def test_content_score_promedia_eeat_de_paginas_con_dato():
 
 
 # ---------- Integración con DB: idempotencia ----------
-def _make_project(conn, slug="test-opp") -> int:
+def _make_project(conn, slug="test-opp", config: dict | None = None) -> int:
     return conn.execute(
         insert(projects).values(
             slug=slug, name="Test", url="https://test.com", gsc_property="sc-domain:test.com",
-            country="CO", language="es", competitors=[], is_active=True, config={},
+            country="CO", language="es", competitors=[], is_active=True, config=config or {},
             created_at=now_iso(),
         )
     ).inserted_primary_key[0]
+
+
+def test_run_opportunities_analysis_no_revienta_leyendo_config_del_proyecto():
+    """Integración de extremo a extremo: run_opportunities_analysis debe leer
+    project.config["noindex_justified_patterns"] de la DB sin reventar (antes
+    de este fix, el parámetro ni existía en esta función) — el efecto
+    observable de la config está cubierto por separado (ver
+    test_technical_score_no_distingue_amarillo_de_rojo_por_diseno arriba,
+    y la severidad del issue real en test_analyzers.py)."""
+    with get_connection() as conn:
+        pid = _make_project(
+            conn, "test-opp-noindex-con-config", config={"noindex_justified_patterns": ["/ciudad/*"]}
+        )
+        conn.execute(
+            insert(pages).values(
+                project_id=pid, url="https://test.com/ciudad/pasto",
+                first_seen=now_iso(), is_indexable=False,
+            )
+        )
+
+    result = run_opportunities_analysis(pid)
+    assert result is not None
+
+    with get_connection() as conn:
+        technical_score = conn.execute(
+            select(scores.c.value).where(scores.c.project_id == pid, scores.c.kind == "technical")
+        ).scalar()
+    assert technical_score is not None
 
 
 def test_run_opportunities_analysis_es_idempotente():

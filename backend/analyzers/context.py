@@ -11,7 +11,7 @@ from sqlalchemy import desc, func, select
 
 from backend.analyzers.opportunities import calculate_content_score, calculate_seo_score, calculate_technical_score
 from backend.db.database import gsc_daily_totals_last_n_days, latest_gsc_query_date
-from backend.db.schema import gsc_queries, issues, pages, scores
+from backend.db.schema import gsc_queries, issues, pages, projects, scores
 
 
 def build_project_context(conn, project_id: int) -> dict:
@@ -27,7 +27,8 @@ def build_project_context(conn, project_id: int) -> dict:
     ).scalar() or 0
 
     page_dicts = [dict(p._mapping) for p in conn.execute(select(pages).where(pages.c.project_id == project_id)).all()]
-    technical_score = calculate_technical_score(page_dicts)
+    project_config = conn.execute(select(projects.c.config).where(projects.c.id == project_id)).scalar() or {}
+    technical_score = calculate_technical_score(page_dicts, project_config.get("noindex_justified_patterns") or [])
     content_score = calculate_content_score(page_dicts)
 
     def _latest_score_value(kind: str) -> int | None:

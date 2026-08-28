@@ -35,7 +35,7 @@ from backend.analyzers.content import (
     flesch_huerta_score,
 )
 from backend.analyzers.issue_store import reconcile_page_issues, record_issue
-from backend.analyzers.technical import PageData, analyze_page
+from backend.analyzers.technical import PageData, analyze_page, is_noindex_justified
 from backend.collectors import progress
 from backend.collectors.base import BaseCollector, CollectorResult
 from backend.config import configure_logging
@@ -731,6 +731,12 @@ class TechnicalCrawler(BaseCollector):
             "by_severity": {"critical": 0, "high": 0, "medium": 0},
         }
         expected_lang = self.project.get("language", "es")
+        # § mejoras 2026-08-28: ver docstring de is_noindex_justified()
+        # (backend/analyzers/technical.py) — bug real corregido ahí, función
+        # compartida con page_data_from_stored_row/calculate_technical_score/
+        # _rebuild_technical_report para que el semáforo sea consistente en
+        # los 4 lugares que reconstruyen PageData, no solo aquí.
+        noindex_justified_patterns = (self.project.get("config") or {}).get("noindex_justified_patterns") or []
 
         with get_connection() as conn:
             for raw in raw_pages:
@@ -767,6 +773,7 @@ class TechnicalCrawler(BaseCollector):
                         og=raw.get("og", {}),
                         canonical=raw.get("canonical"),
                         is_indexable=raw.get("is_indexable", True),
+                        noindex_justified=is_noindex_justified(raw["url"], noindex_justified_patterns),
                         lang_declared=expected_lang,
                         x_robots_tag=raw.get("x_robots_tag"),
                     )

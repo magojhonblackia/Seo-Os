@@ -20,7 +20,7 @@ from backend.analyzers.mago import MagoIssue
 from backend.analyzers.site_health import _latest_snapshot_raw
 from backend.analyzers.technical import analyze_page, page_data_from_stored_row
 from backend.db.database import get_connection, latest_gsc_query_date, now_iso
-from backend.db.schema import gsc_daily, gsc_queries, pages, scores, snapshots
+from backend.db.schema import gsc_daily, gsc_queries, pages, projects, scores, snapshots
 
 MIN_IMPRESSIONS_FOR_CTR_SIGNAL = 5
 
@@ -100,15 +100,21 @@ def detect_zero_impression_pages(
     return issues_out
 
 
-def calculate_technical_score(page_rows: list[dict]) -> int | None:
+def calculate_technical_score(page_rows: list[dict], noindex_justified_patterns: list[str] | None = None) -> int | None:
     """% de celdas en verde del semáforo técnico, promediado entre todas las
-    páginas crawleadas. None si aún no hay páginas (regla P1: no inventar)."""
+    páginas crawleadas. None si aún no hay páginas (regla P1: no inventar).
+
+    `noindex_justified_patterns` opcional — ver docstring de
+    is_noindex_justified() (technical.py): sin esto, una página noindex
+    justificada (ej. ciudades sin volumen de jc) cuenta como celda roja aquí
+    aunque el crawler ya la marque amarilla, inflando el score técnico hacia
+    abajo por algo que no es un problema real."""
     if not page_rows:
         return None
     total = 0
     green = 0
     for row in page_rows:
-        semaphore_row = analyze_page(page_data_from_stored_row(row)).row
+        semaphore_row = analyze_page(page_data_from_stored_row(row, noindex_justified_patterns)).row
         for value in semaphore_row.values():
             total += 1
             if value == "green":
@@ -174,6 +180,10 @@ def run_opportunities_analysis(project_id: int) -> dict:
     now = now_iso()
     with get_connection() as conn:
         latest_date = latest_gsc_query_date(conn, project_id)
+        project_config = conn.execute(
+            select(projects.c.config).where(projects.c.id == project_id)
+        ).scalar() or {}
+        noindex_justified_patterns = project_config.get("noindex_justified_patterns") or []
         query_rows = conn.execute(
             select(gsc_queries).where(gsc_queries.c.project_id == project_id, gsc_queries.c.date == latest_date)
         ).all()
@@ -275,7 +285,7 @@ def run_opportunities_analysis(project_id: int) -> dict:
         found_issues.extend(build_duplicate_content_issues(duplicate_content_findings))
 
         page_dicts = [dict(p._mapping) for p in page_rows]
-        technical_score = calculate_technical_score(page_dicts)
+        technical_score = calculate_technical_score(page_dicts, noindex_justified_patterns)
         content_score = calculate_content_score(page_dicts)
 
         def _latest(kind: str) -> int | None:
