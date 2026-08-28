@@ -25,6 +25,31 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Pestaña 🛰️ DataForSEO dedicada — se movieron las 4 secciones a un solo lugar (2026-08-28)
+
+Pedido directo del usuario tras la entrega anterior: las 4 secciones de
+DataForSEO quedaron dispersas en 4 pestañas distintas (Técnico, GEO, Local,
+Competidores) — quería una sola pestaña que agrupe todo lo que se consulta
+gracias a DataForSEO.
+
+- Nueva pestaña `🛰️ DataForSEO` con las 4 secciones movidas ahí (no
+  duplicadas — se quitaron de sus ubicaciones anteriores): Crawler propio vs
+  renderizado con JS, AI Overview real de Google, Geo-grid rank tracking,
+  Gap real de keywords vs competidor.
+- Banner explicativo arriba de la pestaña aclarando que TODO ahí sale de la
+  API paga de DataForSEO y que ninguno se dispara solo en la auditoría
+  automática (cuestan cupo real).
+- **AI Visibility (Gemini/Claude/DeepSeek) se queda en 🤖 GEO** — no es
+  DataForSEO, es una llamada directa a cada proveedor de IA. Mismo criterio
+  para `security_headers`/`indexnow` (HTTP directo/IndexNow ping, no
+  DataForSEO): siguen sin vista en el dashboard, fuera del alcance de este
+  pedido.
+- Cambio de solo HTML — los `id` de cada control no cambiaron, así que la
+  lógica de `app.js` (loaders, botones, `loadAll()`) no necesitó tocarse.
+  Verificado en vivo: la pestaña nueva muestra las 4 tablas con datos reales
+  de jc, y confirmado por JS que ya no quedó rastro de esas secciones en las
+  4 pestañas originales.
+
 ### Vista en el dashboard para los 4 collectors de DataForSEO que solo vivían en el reporte (2026-08-28)
 
 Bug real reportado por el usuario ("los datos de DataForSEO no se visualizan"):

@@ -60,6 +60,7 @@
     <button class="tab-button" data-tab="backlinks">🔗 Backlinks</button>
     <button class="tab-button" data-tab="local">📍 Local</button>
     <button class="tab-button" data-tab="coverage">🗺️ Cobertura</button>
+    <button class="tab-button" data-tab="dataforseo">🛰️ DataForSEO</button>
   </nav>
 
   <main class="tab-content">
@@ -142,20 +143,6 @@
         <button id="copy-technical-btn" type="button">📋 Copiar tabla (para pegar en una IA)</button>
       </div>
       <div id="technical-table"></div>
-
-      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">
-        🖥️ Crawler propio vs renderizado con JS (DataForSEO On-Page)
-      </h3>
-      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
-        El crawler propio no ejecuta JavaScript — esto lo compara contra la versión renderizada real. Solo se
-        marca hallazgo cuando lo renderizado trae MÁS contenido. Cuesta cupo real de DataForSEO por página.
-      </p>
-      <div class="filters-row">
-        <input id="js-rendering-urls" type="text" placeholder="URLs específicas separadas por coma (vacío = hasta 10 páginas ya crawleadas)" style="flex:1;" />
-        <button id="js-rendering-btn" type="button">🖥️ Comparar renderizado</button>
-      </div>
-      <span id="js-rendering-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
-      <div id="js-rendering-table" class="table-wrapper"></div>
     </div>
 
     <div id="tab-geo" class="tab-panel">
@@ -175,23 +162,6 @@
         <span id="ai-visibility-status" style="font-size:12px; color:var(--text-muted);"></span>
       </div>
       <div id="ai-visibility-results"></div>
-
-      <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">
-        🌐 AI Overview real de Google (SERP en vivo)
-      </h3>
-      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
-        A diferencia de arriba (llamada directa al modelo), esto es el AI Overview REAL que muestra el SERP de
-        Google, con sus fuentes citadas. El dominio de cada fuente no está disponible en esta API (siempre
-        llega como "google.com"), así que "¿te cita?" se aproxima por nombre de marca. Cuesta cupo real de
-        DataForSEO por keyword.
-      </p>
-      <div class="filters-row">
-        <input id="ai-overview-keywords" type="text" placeholder="Keywords separadas por coma (obligatorio)" style="flex:1;" />
-        <input id="ai-overview-location" type="text" placeholder="location_code (ej: 2170 = Colombia)" style="width:220px;" />
-        <button id="ai-overview-btn" type="button">🌐 Consultar AI Overview</button>
-      </div>
-      <span id="ai-overview-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
-      <div id="ai-overview-table" class="table-wrapper"></div>
     </div>
 
     <div id="tab-content" class="tab-panel">
@@ -235,20 +205,6 @@
       <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase;">Keyword Gap</h3>
       <div id="competitors-gaps" style="margin-bottom:16px;"></div>
 
-      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🔑 Gap real de keywords vs competidor (DataForSEO Labs — ranking real, no comparación de texto)</h3>
-      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
-        A diferencia del Keyword Gap de arriba (compara título/H1), esto consulta el ranking real de cada
-        competidor registrado en Google (DataForSEO Labs Ranked Keywords) y muestra las keywords con volumen
-        donde SÍ rankean y tú no tienes ninguna impresión registrada en Search Console. Cuesta cupo real de
-        DataForSEO por competidor.
-      </p>
-      <div class="filters-row">
-        <input id="competitor-kw-location" type="text" placeholder="location_code (ej: 2170 = Colombia)" style="flex:1;" />
-        <button id="competitor-kw-btn" type="button">🔑 Consultar keywords rankeadas (todos los competidores)</button>
-      </div>
-      <span id="competitor-kw-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
-      <div id="competitor-kw-results" style="margin-bottom:16px;"></div>
-
       <div class="filters-row" style="justify-content: space-between; align-items: center;">
         <h3 style="margin:0; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🔬 Qué está haciendo bien (competidor seleccionado)</h3>
         <button id="competitor-insights-btn" type="button">🪄 Generar insights con IA</button>
@@ -291,19 +247,6 @@
       <span id="local-rank-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
       <div id="local-rank-table" class="table-wrapper" style="margin-bottom:16px;"></div>
 
-      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">📍 Geo-grid rank tracking (visibilidad por punto geográfico, no un solo origen)</h3>
-      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
-        Verifica el Local Pack de Maps desde varios puntos alrededor del centro configurado del negocio (§
-        Configuración), no un solo punto de origen — mismo concepto que Local Falcon. Cuesta cupo real de
-        DataForSEO por punto de grilla × keyword.
-      </p>
-      <div class="filters-row">
-        <input id="geo-grid-keywords" type="text" placeholder="Keywords separadas por coma (obligatorio)" style="flex:1;" />
-        <button id="geo-grid-btn" type="button">📍 Correr grilla</button>
-      </div>
-      <span id="geo-grid-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
-      <div id="geo-grid-table" class="table-wrapper" style="margin-bottom:16px;"></div>
-
       <div class="empty-state" style="font-size:12px;">
         📋 Citations en directorios (Yelp, Facebook, otros directorios locales): siguen sin verificarse — requieren
         una API externa distinta no configurada en este entorno. El ranking en Maps y el rating/reseñas de arriba
@@ -327,6 +270,66 @@
 
       <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; margin-top:24px;">📈 GA4 — conversiones por landing page</h3>
       <div id="coverage-ga4"></div>
+    </div>
+
+    <div id="tab-dataforseo" class="tab-panel">
+      <div class="empty-state" style="font-size:12px; margin-bottom:16px;">
+        🛰️ Todo lo de esta pestaña viene de la API paga de <strong>DataForSEO</strong> (Configuración → API keys) —
+        cada botón consulta cupo real, no se disparan solos en "Ejecutar auditoría". El resto del dashboard usa
+        otras fuentes (Search Console, Serper, Lighthouse, etc.) — ver README para el detalle de cada una.
+      </div>
+
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🖥️ Crawler propio vs renderizado con JS (On-Page Browser Rendering)</h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        El crawler propio no ejecuta JavaScript — esto lo compara contra la versión renderizada real. Solo se
+        marca hallazgo cuando lo renderizado trae MÁS contenido. Cuesta cupo real por página.
+      </p>
+      <div class="filters-row">
+        <input id="js-rendering-urls" type="text" placeholder="URLs específicas separadas por coma (vacío = hasta 10 páginas ya crawleadas)" style="flex:1;" />
+        <button id="js-rendering-btn" type="button">🖥️ Comparar renderizado</button>
+      </div>
+      <span id="js-rendering-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="js-rendering-table" class="table-wrapper" style="margin-bottom:24px;"></div>
+
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🌐 AI Overview real de Google (SERP en vivo)</h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        AI Overview REAL que muestra el SERP de Google, con sus fuentes citadas — no una llamada directa a un LLM
+        (eso está en 🤖 GEO → AI Visibility). El dominio de cada fuente no está disponible en esta API (siempre
+        llega como "google.com"), así que "¿te cita?" se aproxima por nombre de marca. Cuesta cupo real por keyword.
+      </p>
+      <div class="filters-row">
+        <input id="ai-overview-keywords" type="text" placeholder="Keywords separadas por coma (obligatorio)" style="flex:1;" />
+        <input id="ai-overview-location" type="text" placeholder="location_code (ej: 2170 = Colombia)" style="width:220px;" />
+        <button id="ai-overview-btn" type="button">🌐 Consultar AI Overview</button>
+      </div>
+      <span id="ai-overview-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="ai-overview-table" class="table-wrapper" style="margin-bottom:24px;"></div>
+
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">📍 Geo-grid rank tracking (visibilidad por punto geográfico, Maps SERP)</h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        Verifica el Local Pack de Maps desde varios puntos alrededor del centro configurado del negocio (§
+        Configuración), no un solo punto de origen — mismo concepto que Local Falcon. Cuesta cupo real por
+        punto de grilla × keyword.
+      </p>
+      <div class="filters-row">
+        <input id="geo-grid-keywords" type="text" placeholder="Keywords separadas por coma (obligatorio)" style="flex:1;" />
+        <button id="geo-grid-btn" type="button">📍 Correr grilla</button>
+      </div>
+      <span id="geo-grid-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="geo-grid-table" class="table-wrapper" style="margin-bottom:24px;"></div>
+
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🔑 Gap real de keywords vs competidor (Labs Ranked Keywords — ranking real, no comparación de texto)</h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        A diferencia del Keyword Gap de 🆚 Competidores (compara título/H1), esto consulta el ranking real de
+        cada competidor registrado en Google y muestra las keywords con volumen donde SÍ rankean y tú no tienes
+        ninguna impresión registrada en Search Console. Cuesta cupo real por competidor.
+      </p>
+      <div class="filters-row">
+        <input id="competitor-kw-location" type="text" placeholder="location_code (ej: 2170 = Colombia)" style="flex:1;" />
+        <button id="competitor-kw-btn" type="button">🔑 Consultar keywords rankeadas (todos los competidores)</button>
+      </div>
+      <span id="competitor-kw-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="competitor-kw-results" style="margin-bottom:16px;"></div>
     </div>
   </main>
 
