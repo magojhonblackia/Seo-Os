@@ -1172,6 +1172,39 @@ señales/acción recomendada para los backlinks marcados (tope de 20 filas).
 
 Suite: 663 tests.
 
+### AI Visibility comparativo: cuándo la IA menciona al competidor y no a ti (2026-08-26)
+
+Pedido explícito del usuario tras preguntar cómo analizar mejor a la
+competencia. AI Visibility ya medía SI la IA te menciona; nunca comparaba
+contra los competidores registrados en las MISMAS preguntas.
+
+`competitor_mentions` (nueva columna JSON en `ai_visibility_checks`): qué
+dominios de `project.competitors` aparecen en la respuesta. Deliberadamente
+**solo se calcula en prompts de categoría** (ej. "¿cuál es el mejor taller
+en Cali?"), nunca en marca ni comparación — ahí el nombre (propio o del
+competidor) ya estaba en la pregunta, así que contarlo repetiría lo que ya
+sabíamos, no sería una señal nueva (mismo criterio que `mentions_business`,
+establecido el 2026-07-27). El match de dominio a nombre "hablado" es una
+heurística aproximada por diseño (`_competitor_tokens`: dominio completo +
+raíz sin TLD + raíz con guiones como espacios) — declarada así en el código,
+no hay forma honesta de adivinar el nombre comercial exacto solo del
+dominio.
+
+`build_ai_visibility_comparison()` (`backend/analyzers/ai_visibility.py`):
+sobre las preguntas de categoría, cuántas veces te mencionan a ti vs a cada
+competidor. `build_ai_visibility_competitor_issues()`: issue nueva SOLO
+cuando un competidor aparece en más respuestas que tú — un hecho
+comparativo con el conteo exacto, nunca una afirmación causal de qué lo
+explica (mismo límite honesto de `build_ai_visibility_issues` original:
+consultar un LLM no lo entrena, no hay acción que garantice más menciones).
+
+Sección nueva en el reporte, junto a AI Visibility. Verificado en vivo
+contra los 18 checks reales de categoría ya guardados de jc: 0 menciones
+propias, ningún competidor registrado apareció tampoco (honesto — esos
+checks son anteriores a esta función, no tienen el dato retroactivo).
+
+Suite: 671 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

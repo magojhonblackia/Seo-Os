@@ -394,5 +394,13 @@ ai_visibility_checks = Table(
     # conozco" — el substring match ahí sería un falso positivo. Solo es una
     # señal real en prompts de categoría, donde el nombre no se dio antes.
     Column("mentions_business", Boolean),
+    # § mejoras 2026-08-26: AI Visibility comparativo (pedido explícito del
+    # usuario) — qué dominios de project.competitors aparecen en la MISMA
+    # respuesta. Mismo criterio de honestidad que mentions_business: solo se
+    # calcula para prompts de categoría (donde ningún nombre —ni el nuestro
+    # ni el del competidor— estaba en la pregunta), nunca para comparación
+    # (el competidor ya está nombrado en la pregunta ahí, sería repetir lo
+    # que ya sabíamos, no una señal nueva).
+    Column("competitor_mentions", JSON, default=list),
     Column("checked_at", String, nullable=False),
 )

@@ -609,12 +609,16 @@ def get_ai_visibility(project: dict = Depends(get_project_or_404)) -> dict:
             "prompt": r.prompt,
             "response_text": r.response_text,
             "mentions_business": r.mentions_business,
+            "competitor_mentions": r.competitor_mentions or [],
             "checked_at": r.checked_at,
         }
         for r in latest_by_key.values()
     ]
     checks.sort(key=lambda c: (c["prompt_type"], c["provider"]))
-    return {"checks": checks, "checked_at": rows[0].checked_at}
+
+    from backend.analyzers.ai_visibility import build_ai_visibility_comparison
+
+    return {"checks": checks, "checked_at": rows[0].checked_at, "comparison": build_ai_visibility_comparison(checks)}
 
 
 @router.get("/{slug}/local")

@@ -14,7 +14,9 @@ from backend.collectors import ai_visibility
 from backend.collectors.ai_visibility import (
     ProviderError,
     _build_prompts,
+    _competitor_tokens,
     _mentions_business,
+    _mentions_competitors,
     _strip_accents,
     run_ai_visibility_collector,
 )
@@ -25,12 +27,15 @@ from backend.main import app
 client = TestClient(app)
 
 
-def _make_project(slug: str, name: str = "JC Reparaciones", url: str = "https://jcreparaciones.com") -> object:
+def _make_project(
+    slug: str, name: str = "JC Reparaciones", url: str = "https://jcreparaciones.com",
+    competitors: list[str] | None = None,
+) -> object:
     with get_connection() as conn:
         pid = conn.execute(
             insert(projects).values(
                 slug=slug, name=name, url=url, gsc_property=f"sc-domain:{url.split('//')[-1]}",
-                country="CO", language="es", competitors=[], is_active=True, config={}, created_at=now_iso(),
+                country="CO", language="es", competitors=competitors or [], is_active=True, config={}, created_at=now_iso(),
             )
         ).inserted_primary_key[0]
         return conn.execute(select(projects).where(projects.c.id == pid)).first()
@@ -331,3 +336,95 @@ def test_run_dos_veces_no_duplica_y_cierra_si_luego_hay_mencion():
             .where(issues_table.c.project_id == project.id, issues_table.c.category == "ai_visibility")
         ).all()
     assert all(r.status == "resolved" for r in rows)  # ya no hay ninguna abierta
+
+
+# ---------- AI Visibility comparativo (§ mejoras 2026-08-26) ----------
+
+def test_competitor_tokens_saca_variantes_buscables_del_dominio():
+    tokens = _competitor_tokens("capriservicios.com")
+    assert "capriservicios.com" in tokens
+    assert "capriservicios" in tokens
+
+    tokens_guion = _competitor_tokens("mi-taller.com")
+    assert "mi taller" in tokens_guion  # aproxima el nombre "hablado"
+
+
+def test_mentions_competitors_detecta_dominio_registrado():
+    project = _make_project("test-aiv-competitors", competitors=["capriservicios.com", "otrotaller.co"])
+    found = _mentions_competitors("Te recomiendo Capriservicios, buena reputación en Cali", project)
+    assert found == ["capriservicios.com"]
+
+
+def test_mentions_competitors_vacio_si_ninguno_aparece():
+    project = _make_project("test-aiv-competitors-vacio", competitors=["capriservicios.com"])
+    assert _mentions_competitors("No conozco ningún negocio así", project) == []
+
+
+def test_run_guarda_competitor_mentions_solo_en_categoria():
+    project = _make_project(
+        "test-aiv-competitor-mentions-categoria", competitors=["capriservicios.com"],
+    )
+    _add_gsc_query(project.id, "reparacion de celulares cali", 40)
+
+    def fake_ask(api_key, prompt):
+        if "Qué sabes" in prompt:
+            return "No tengo información sobre JC Reparaciones."
+        return "Te recomiendo Capriservicios, tienen buena reputación en Cali."
+
+    with patch("backend.collectors.ai_visibility._configured_providers", return_value={"deepseek": "fake-key"}), \
+         patch.dict(ai_visibility._PROVIDERS, {"deepseek": fake_ask}):
+        run_ai_visibility_collector("test-aiv-competitor-mentions-categoria")
+
+    with get_connection() as conn:
+        rows = conn.execute(
+            select(ai_visibility_checks).where(ai_visibility_checks.c.project_id == project.id)
+        ).all()
+    by_type = {r.prompt_type: r for r in rows}
+    assert by_type["brand"].competitor_mentions == []  # nunca se calcula en marca/comparación
+    assert by_type["category"].competitor_mentions == ["capriservicios.com"]
+
+
+def test_build_ai_visibility_comparison_cuenta_menciones_por_dominio():
+    from backend.analyzers.ai_visibility import build_ai_visibility_comparison
+
+    checks = [
+        {"prompt_type": "category", "mentions_business": True, "competitor_mentions": []},
+        {"prompt_type": "category", "mentions_business": False, "competitor_mentions": ["capriservicios.com"]},
+        {"prompt_type": "category", "mentions_business": False, "competitor_mentions": ["capriservicios.com"]},
+        {"prompt_type": "brand", "mentions_business": None, "competitor_mentions": []},  # se ignora
+    ]
+    comparison = build_ai_visibility_comparison(checks)
+    assert comparison["available"] is True
+    assert comparison["total_category_prompts"] == 3
+    assert comparison["our_mentions"] == 1
+    assert comparison["competitor_mentions"] == [{"domain": "capriservicios.com", "count": 2, "pct": round(200 / 3, 1)}]
+
+
+def test_build_ai_visibility_comparison_sin_categoria_no_disponible():
+    from backend.analyzers.ai_visibility import build_ai_visibility_comparison
+
+    comparison = build_ai_visibility_comparison([{"prompt_type": "brand", "mentions_business": None, "competitor_mentions": []}])
+    assert comparison["available"] is False
+
+
+def test_build_ai_visibility_competitor_issues_solo_si_el_competidor_gana():
+    from backend.analyzers.ai_visibility import build_ai_visibility_competitor_issues
+
+    # Empatados o ganamos nosotros: sin issue.
+    checks_ok = [
+        {"prompt_type": "category", "mentions_business": True, "competitor_mentions": ["capriservicios.com"]},
+    ]
+    assert build_ai_visibility_competitor_issues(checks_ok) == []
+
+    # El competidor aparece más veces que nosotros: sí genera issue, con el
+    # conteo exacto en el título (hecho comparativo, no opinión).
+    checks_perdemos = [
+        {"prompt_type": "category", "mentions_business": False, "competitor_mentions": ["capriservicios.com"]},
+        {"prompt_type": "category", "mentions_business": False, "competitor_mentions": ["capriservicios.com"]},
+        {"prompt_type": "category", "mentions_business": True, "competitor_mentions": []},
+    ]
+    issues = build_ai_visibility_competitor_issues(checks_perdemos)
+    assert len(issues) == 1
+    assert "capriservicios.com" in issues[0].title
+    assert "2 de 3" in issues[0].title
+    assert "vs tus 1" in issues[0].title

@@ -222,6 +222,32 @@ def _mentions_business(response_text: str, project) -> bool:
     return normalized_name in normalized_response or domain.lower() in normalized_response
 
 
+def _competitor_tokens(domain: str) -> set[str]:
+    """De 'capriservicios.com' o 'mi-taller.com' saca tokens buscables:
+    dominio completo, la parte antes del TLD, y esa misma parte con los
+    guiones cambiados por espacio (aproxima el nombre "hablado" del negocio).
+    Heurística aproximada por diseño (P1: no hay forma honesta de adivinar el
+    nombre comercial exacto solo del dominio) — puede no capturar variantes
+    reales del nombre (ej. "Capri Servicios Técnicos" vs "capriservicios")."""
+    root = domain.lower().removeprefix("www.").split(".")[0]
+    tokens = {domain.lower(), root}
+    if "-" in root:
+        tokens.add(root.replace("-", " "))
+    return {t for t in tokens if len(t) > 3}  # descarta tokens tan cortos que producen ruido
+
+
+def _mentions_competitors(response_text: str, project) -> list[str]:
+    """Qué dominios de project.competitors aparecen en esta respuesta — solo
+    se llama para prompts de CATEGORÍA, mismo criterio que _mentions_business
+    (ver comentario en ai_visibility_checks.competitor_mentions)."""
+    normalized_response = _strip_accents(response_text.lower())
+    found = []
+    for domain in project.competitors or []:
+        if any(_strip_accents(token) in normalized_response for token in _competitor_tokens(domain)):
+            found.append(domain)
+    return found
+
+
 def _insert_snapshot(project_id: int, started: str, status: str, error_message: str | None, raw_data: dict | None) -> int:
     from sqlalchemy import insert as sa_insert
 
@@ -280,6 +306,7 @@ def run_ai_visibility_collector(project_slug: str) -> dict:
                 mentions = _mentions_business(response_text, project) if prompt_type == "category" else None
                 if mentions:
                     mentions_count += 1
+                competitor_mentions = _mentions_competitors(response_text, project) if prompt_type == "category" else []
                 conn.execute(
                     insert(ai_visibility_checks).values(
                         project_id=project.id,
@@ -288,11 +315,17 @@ def run_ai_visibility_collector(project_slug: str) -> dict:
                         prompt=prompt_text,
                         response_text=response_text,
                         mentions_business=mentions,
+                        competitor_mentions=competitor_mentions,
                         checked_at=now,
                     )
                 )
                 saved += 1
-                fresh_checks.append({"provider": provider_name, "prompt_type": prompt_type, "mentions_business": mentions})
+                fresh_checks.append({
+                    "provider": provider_name,
+                    "prompt_type": prompt_type,
+                    "mentions_business": mentions,
+                    "competitor_mentions": competitor_mentions,
+                })
 
     if saved == 0:
         message = f"Ningún proveedor respondió. Errores: {'; '.join(errors)}"
@@ -300,21 +333,28 @@ def run_ai_visibility_collector(project_slug: str) -> dict:
         return {"snapshot_id": snapshot_id, "status": "error", "summary": None, "message": message}
 
     status = "partial" if errors else "ok"
+    from backend.analyzers.ai_visibility import build_ai_visibility_comparison
+
     summary = {
         "checks_saved": saved,
         "mentions_count": mentions_count,
         "providers_used": list(providers.keys()),
         "errors": errors,
+        "comparison": build_ai_visibility_comparison(fresh_checks),
     }
     snapshot_id = _insert_snapshot(project.id, started, status, None, summary)
 
     # § mejoras 2026-08-23: issues accionables del Action Plan, no solo texto
     # crudo — ver backend/analyzers/ai_visibility.py para el límite honesto
     # de qué SÍ se puede recomendar aquí.
-    from backend.analyzers.ai_visibility import AI_VISIBILITY_OWNED_CATEGORIES, build_ai_visibility_issues
+    from backend.analyzers.ai_visibility import (
+        AI_VISIBILITY_OWNED_CATEGORIES,
+        build_ai_visibility_competitor_issues,
+        build_ai_visibility_issues,
+    )
     from backend.analyzers.issue_store import reconcile_project_issues, record_issue
 
-    found_issues = build_ai_visibility_issues(fresh_checks)
+    found_issues = build_ai_visibility_issues(fresh_checks) + build_ai_visibility_competitor_issues(fresh_checks)
     with get_connection() as conn:
         for issue in found_issues:
             record_issue(conn, project_id=project.id, snapshot_id=snapshot_id, page_id=None, issue=issue, now=now)

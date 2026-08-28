@@ -203,6 +203,37 @@ async def test_reporte_ai_visibility_no_trata_comparison_como_categoria():
 
 
 @pytest.mark.asyncio
+async def test_reporte_incluye_ai_visibility_comparativo():
+    """§ mejoras 2026-08-26, pedido explícito del usuario: sobre las preguntas
+    de categoría (ningún nombre en la pregunta), cuántas veces la IA te
+    menciona a ti vs a cada competidor registrado."""
+    project = _make_project("test-report-ai-visibility-comparativo")
+    with get_connection() as conn:
+        conn.execute(insert(ai_visibility_checks).values(
+            project_id=project["id"], provider="deepseek", prompt_type="category",
+            prompt="¿Cuál es el mejor taller de reparación de celulares en Cali?",
+            response_text="Te recomiendo Capriservicios, buena reputación.",
+            mentions_business=False, competitor_mentions=["capriservicios.com"], checked_at=now_iso(),
+        ))
+        conn.execute(insert(ai_visibility_checks).values(
+            project_id=project["id"], provider="gemini", prompt_type="category",
+            prompt="¿Cuál es el mejor taller de reparación de celulares en Cali?",
+            response_text="Te recomiendo Capriservicios, buena reputación.",
+            mentions_business=False, competitor_mentions=["capriservicios.com"], checked_at=now_iso(),
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(project)
+
+    section_idx = html.find("Comparativo (solo preguntas de categoría")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 600]
+    assert "0 de 2" in section  # nunca nos mencionan en esta muestra
+    assert "capriservicios.com" in section
+    assert "🔴 más que tú" in section
+
+
+@pytest.mark.asyncio
 async def test_seccion_de_honestidad_no_declara_no_medible_lo_que_ya_medimos():
     """Regresión real 2026-07-25: la sección seguía diciendo que las reseñas de
     Google y la posición de competidores eran imposibles de medir, cuando ya se

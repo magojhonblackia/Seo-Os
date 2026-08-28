@@ -96,6 +96,9 @@ _EXTRA_COLUMNS_BY_TABLE = {
     "serp_rankings": {
         "serp_features": "TEXT",  # JSON; § mejoras 2026-07-25, captura oportunista de PAA/answerBox
     },
+    "ai_visibility_checks": {
+        "competitor_mentions": "TEXT",  # JSON; § mejoras 2026-08-26, AI Visibility comparativo
+    },
 }
 
 

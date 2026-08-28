@@ -439,10 +439,38 @@ async def generate_html_report(project: dict) -> str:
                 f'<div class="diff">{_esc(c["response_text"][:500])}{"…" if len(c["response_text"]) > 500 else ""}</div>'
                 "</div>"
             )
+        # AI Visibility comparativo (§ mejoras 2026-08-26, pedido explícito del
+        # usuario): sobre las preguntas de categoría, cuántas veces te
+        # menciona la IA vs a cada competidor registrado — señal simétrica,
+        # ninguno de los dos nombres estaba en la pregunta.
+        comparison = ai_visibility.get("comparison") or {}
+        if comparison.get("available"):
+            comp_rows = comparison.get("competitor_mentions") or []
+            comparison_block = (
+                '<p style="margin-top:10px;"><strong>Comparativo (solo preguntas de categoría, '
+                "ningún nombre estaba en la pregunta):</strong> te mencionan en "
+                f'<strong>{comparison["our_mentions"]} de {comparison["total_category_prompts"]}</strong> '
+                f'({comparison["our_mention_pct"]}%).</p>'
+                + (
+                    "<table><thead><tr><th>Competidor</th><th>Menciones</th><th>%</th></tr></thead><tbody>"
+                    + "".join(
+                        f'<tr><td>{_esc(c["domain"])}</td><td>{c["count"]}/{comparison["total_category_prompts"]}</td>'
+                        f'<td>{c["pct"]}%{" 🔴 más que tú" if c["count"] > comparison["our_mentions"] else ""}</td></tr>'
+                        for c in comp_rows
+                    )
+                    + "</tbody></table>"
+                    if comp_rows
+                    else '<p class="muted">Ningún competidor registrado apareció en estas respuestas.</p>'
+                )
+            )
+        else:
+            comparison_block = ""
+
         ai_visibility_block = (
             f'<p class="muted">Última consulta: {_esc(ai_visibility.get("checked_at"))}. '
             "Respuesta real de la API de cada proveedor a una pregunta real — no un promedio ni un sentimiento calculado, "
             "el texto tal cual lo devolvió el modelo en ese momento (puede variar en la próxima corrida).</p>"
+            + comparison_block
             + "\n".join(rows_html)
         )
 
