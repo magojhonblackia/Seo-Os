@@ -553,6 +553,30 @@ def get_local_pack(project: dict = Depends(get_project_or_404)) -> dict:
     return {"rows": [dict(r._mapping) for r in rows], "date": latest_date}
 
 
+@router.get("/{slug}/js-rendering-check")
+def get_js_rendering_check(project: dict = Depends(get_project_or_404)) -> dict:
+    """Compara el crawler propio (HTML crudo) contra la versión renderizada
+    con JS (DataForSEO On-Page) — última corrida. Disparo manual, ver
+    backend/collectors/js_rendering_check.py."""
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data, snapshots.c.status, snapshots.c.finished_at)
+            .where(snapshots.c.project_id == project["id"], snapshots.c.collector == "js_rendering_check")
+            .order_by(desc(snapshots.c.id))
+            .limit(1)
+        ).first()
+
+    if row is None:
+        return {
+            "available": False,
+            "empty_reason": "Sin comparación todavía — ejecuta 'js_rendering_check' (requiere DataForSEO configurado).",
+        }
+
+    raw = row[0] or {}
+    results = [r for r in (raw.get("results") or []) if "error" not in r]
+    return {"available": True, "checked_at": row[2], "results": results}
+
+
 @router.get("/{slug}/geo-grid")
 def get_geo_grid(project: dict = Depends(get_project_or_404)) -> dict:
     """Visibilidad en el Local Pack de Maps por PUNTO geográfico, no un solo

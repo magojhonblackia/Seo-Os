@@ -195,7 +195,12 @@ async def test_reporte_ai_visibility_no_trata_comparison_como_categoria():
     with _mock_provider():
         html = await generate_html_report(project)
 
-    idx = html.find("comparación")
+    # § mejoras 2026-08-28: buscar "comparación" a secas ya no es único en la
+    # página (la sección de renderizado JS también dice "Sin comparación
+    # todavía") — se ancla a la sección de AI Visibility primero.
+    section_idx = html.find("<h2>🧠 AI Visibility")
+    assert section_idx != -1
+    idx = html.find("comparación", section_idx)
     assert idx != -1, "debe mostrar la etiqueta 'comparación', no 'categoría'"
     snippet = html[idx:idx + 300]
     assert "no te menciona" not in snippet
@@ -872,3 +877,44 @@ async def test_reporte_geo_grid_declara_sin_datos():
     section_idx = html.find("Geo-grid rank tracking")
     assert section_idx != -1
     assert "Sin datos" in html[section_idx:section_idx + 300]
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_js_rendering_check():
+    """§ mejoras 2026-08-28: comparación crawler propio vs renderizado JS
+    (DataForSEO On-Page), pedido explícito del usuario. Usa la forma real de
+    datos verificada en vivo contra jc (crudo > renderizado, sin gap)."""
+    project = _make_project("test-report-js-rendering")
+    pid = project["id"]
+    with get_connection() as conn:
+        conn.execute(insert(snapshots).values(
+            project_id=pid, collector="js_rendering_check", status="ok",
+            started_at=now_iso(), finished_at=now_iso(),
+            raw_data={"results": [
+                {"page_id": 1, "url": "https://reporte-test.com/", "raw_word_count": 3301,
+                 "rendered_word_count": 2187, "gap_pct": -33.7, "significant_gap": False,
+                 "raw_title": "T", "rendered_title": "T", "title_matches": True},
+            ]},
+            created_at=now_iso(),
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-js-rendering"))
+
+    section_idx = html.find("Crawler propio vs renderizado con JS")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 700]
+    assert "3301" in section
+    assert "2187" in section
+    assert "Ningún gap significativo" in section
+
+
+@pytest.mark.asyncio
+async def test_reporte_js_rendering_declara_sin_datos():
+    project = _make_project("test-report-js-rendering-vacio")
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-js-rendering-vacio"))
+
+    section_idx = html.find("Crawler propio vs renderizado con JS")
+    assert section_idx != -1
+    assert "Sin comparación todavía" in html[section_idx:section_idx + 300]

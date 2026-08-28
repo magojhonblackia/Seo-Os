@@ -42,6 +42,7 @@ from backend.api.routes_dashboard import (
     get_indexation,
     get_keywords,
     get_geo_grid,
+    get_js_rendering_check,
     get_local_pack,
     get_local_seo,
     get_pagespeed,
@@ -230,6 +231,7 @@ async def generate_html_report(project: dict) -> str:
     keyword_ideas = get_keyword_ideas(project)
     local_pack = get_local_pack(project)
     geo_grid = get_geo_grid(project)
+    js_rendering_check = get_js_rendering_check(project)
     serp_analysis = get_serp_analysis(project)
     pagespeed_data = get_pagespeed(project)
     indexation = get_indexation(project)
@@ -878,6 +880,31 @@ async def generate_html_report(project: dict) -> str:
             + "".join(sections)
         )
 
+    # ---------- Crawler propio vs renderizado con JS (§ mejoras 2026-08-28,
+    # DataForSEO On-Page instant_pages) ----------
+    if not js_rendering_check.get("available"):
+        js_rendering_block = f'<p class="muted">{_esc(js_rendering_check.get("empty_reason") or "Sin comparación todavía.")}</p>'
+    else:
+        jr_results = js_rendering_check.get("results") or []
+        gaps = [r for r in jr_results if r.get("significant_gap")]
+        js_rendering_block = (
+            f'<p class="muted">Comparación del {_esc(js_rendering_check.get("checked_at"))} — el crawler propio no '
+            "ejecuta JavaScript; esto compara contra la versión renderizada real. Solo se marca hallazgo cuando lo "
+            "renderizado trae MÁS contenido — lo contrario es diferencia de metodología de conteo, no evidencia de nada.</p>"
+            + (
+                f'<p><strong>{len(gaps)} de {len(jr_results)}</strong> página(s) con contenido significativamente oculto tras JS.</p>'
+                if gaps
+                else f'<p>Ningún gap significativo en las {len(jr_results)} página(s) comparadas — el crawler actual ve el contenido real.</p>'
+            )
+            + "<table><thead><tr><th>Página</th><th>Palabras (crudo)</th><th>Palabras (renderizado)</th><th>Diferencia</th></tr></thead><tbody>"
+            + "".join(
+                f'<tr><td>{_esc(r["url"])}</td><td>{r["raw_word_count"]}</td><td>{r["rendered_word_count"]}</td>'
+                f'<td>{"🔴 " if r["significant_gap"] else ""}{r["gap_pct"]}%</td></tr>'
+                for r in jr_results
+            )
+            + "</tbody></table>"
+        )
+
     # ---------- Headers de seguridad HTTP (§ mejoras 2026-08-25: se analizaba en
     # cada auditoría pero solo generaba issue cuando algo faltaba — con todo bien
     # configurado, como en jc, el reporte no decía absolutamente nada al respecto) ----------
@@ -1170,6 +1197,9 @@ async def generate_html_report(project: dict) -> str:
   <h2>🔧 Técnico</h2>
   <p>🟢 {tech_summary.get("green", 0)} · 🟡 {tech_summary.get("yellow", 0)} · 🔴 {tech_summary.get("red", 0)} (celdas del semáforo, todas las páginas)</p>
   <table><thead><tr><th>Check</th><th>Verde</th><th>Amarillo</th><th>Rojo</th></tr></thead><tbody>{tech_by_check_block}</tbody></table>
+
+  <h2>🖥️ Crawler propio vs renderizado con JS (DataForSEO On-Page)</h2>
+  {js_rendering_block}
 
   <h2>🔒 Headers de seguridad HTTP</h2>
   {security_headers_block}

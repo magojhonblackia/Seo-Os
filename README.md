@@ -1374,6 +1374,42 @@ Primeras corridas reales, ya con el fix:
 Suite: 705 tests (sin cambio de conteo — corrección de bug + verificación
 en vivo, no funciones nuevas).
 
+### Diagnóstico crawler propio vs renderizado con JS (2026-08-28)
+
+Tercera función pedida tras revisar el catálogo de DataForSEO (recomendada
+como prioridad #1 en esa investigación): el crawler propio hace fetch de
+HTML crudo sin ejecutar JavaScript, así que es ciego a contenido inyectado
+del lado del cliente. En vez de reemplazar el crawler (pagar por renderizar
+CADA página sin saber si hace falta sería gastar a ciegas), esta es una
+herramienta de DIAGNÓSTICO: compara una muestra de páginas ya crawleadas
+contra su versión renderizada real (DataForSEO On-Page `instant_pages`,
+`enable_browser_rendering`) y dice, con evidencia, si vale la pena.
+
+Verificado en vivo contra jcreparaciones.com ANTES de escribir la lógica de
+comparación (mismo criterio de todo el proyecto): la home de jc (Next.js
+con SSR) da **3301 palabras en el crawler propio vs 2187 en la versión
+renderizada** — el crawler propio ve MÁS texto, no menos (probablemente
+cuenta boilerplate de nav/footer que la extracción de "content" de
+DataForSEO filtra mejor). Este resultado real cambió el diseño: solo se
+marca `significant_gap` cuando lo RENDERIZADO trae significativamente más
+palabras (umbral 30%) — la dirección contraria (crudo > renderizado, el
+caso real de jc) es ruido de metodología de conteo, nunca "todo bien" ni
+"hay un problema": no se opina en esa dirección.
+
+`backend/collectors/js_rendering_check.py` (nuevo): mismo bug de formato de
+request que `competitor_keywords.py`/`geo_grid.py` (array plano, no
+`{"tasks": [...]}`) — corregido desde el primer intento porque ya se sabía.
+Tope de costo: 10 páginas por corrida (~$0.05), elige las páginas con más
+`word_count` ya crawleadas si no se especifican URLs — nunca adivina URLs
+nuevas. Issue real solo cuando el gap es significativo, con el % exacto en
+el título, nunca una advertencia genérica.
+
+Endpoint `/api/dashboard/{slug}/js-rendering-check` + sección en el
+reporte. Verificado en vivo end-to-end contra jc: el reporte muestra
+correctamente "Ningún gap significativo" con los números reales.
+
+Suite: 720 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

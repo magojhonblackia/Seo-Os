@@ -138,6 +138,9 @@ class CollectRequest(BaseModel):
     # § mejoras 2026-08-28: collector "geo_grid" — ver docstring de geo_grid.py.
     radius_km: float = 3.0
     grid_size: int = Field(default=3, ge=1, le=7)
+    # § mejoras 2026-08-28: collector "js_rendering_check" — URLs específicas
+    # a comparar; vacío = usa las páginas con más word_count ya crawleadas.
+    urls: list[str] | None = Field(default=None, max_length=10)
 
 
 class CollectResult(BaseModel):

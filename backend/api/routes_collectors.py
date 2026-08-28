@@ -20,6 +20,7 @@ from backend.collectors.backlinks import run_backlinks_collector
 from backend.collectors.competitor import scan_competitor
 from backend.collectors.competitor_keywords import run_competitor_keywords_collector
 from backend.collectors.geo_grid import run_geo_grid_collector
+from backend.collectors.js_rendering_check import run_js_rendering_check
 from backend.collectors import progress as crawl_progress
 from backend.collectors.crawler import run_crawler
 from backend.collectors.geo import run_geo_collector
@@ -50,7 +51,7 @@ router = APIRouter(prefix="/api/collect", tags=["collectors"])
 _ALLOWED_MODULES = {
     "crawler", "geo", "opportunities", "trends", "trends_related", "competitor", "backlinks", "local", "gsc",
     "pagespeed", "indexation", "rank_tracking", "local_rank", "sitemap", "ga4", "site_health", "security_headers",
-    "indexnow", "question_ideas", "ai_visibility", "competitor_keywords", "geo_grid",
+    "indexnow", "question_ideas", "ai_visibility", "competitor_keywords", "geo_grid", "js_rendering_check",
 }
 
 
@@ -252,6 +253,19 @@ def trigger_collector(
             project["slug"], location_code=payload.location_code, language_code=payload.language_code
         )
         return {"snapshot_id": None, "status": result["status"], "summary": result.get("results") or {"message": result.get("message")}}
+
+    if module == "js_rendering_check":
+        # Disparo manual, no en la secuencia automática — costo real de pago
+        # por página (DataForSEO On-Page instant_pages, ver js_rendering_check.py).
+        try:
+            result = run_js_rendering_check(project["slug"], urls=payload.urls)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "snapshot_id": result.get("snapshot_id"),
+            "status": result["status"],
+            "summary": result.get("summary") or ({"message": result["message"]} if result.get("message") else None),
+        }
 
     if module == "geo_grid":
         # Disparo manual, no en la secuencia automática — costo real de pago
