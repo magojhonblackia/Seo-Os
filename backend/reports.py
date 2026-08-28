@@ -1104,6 +1104,72 @@ async def generate_html_report(project: dict) -> str:
     </ul>
     """
 
+    # ---------- Secciones independientes (§ 2026-08-28, faltaba: reporte era un solo
+    # bloque de ~880KB de HTML — pegarlo entero en una IA quemaba tokens masivamente
+    # y no había forma de ver de un vistazo qué secciones existían). Cada sección va
+    # envuelta en <section id=...> con su propio botón "Copiar sección" — el título
+    # (h2) es el primer texto que se copia, así quien pegue el fragmento en una IA
+    # sabe de inmediato qué sección le está mandando sin tener que pegar las otras 33.
+    resumen_html = f'<div class="summary-box"><ul>{summary_block}</ul>{summary_note}</div>'
+    scorecards_html = (
+        '<div class="scorecards">'
+        + _scorecard_html("SEO Score", f'{scorecards.get("seo_score", "—")}/100' if scorecards.get("seo_score") is not None else "—", _score_class(scorecards.get("seo_score")))
+        + _scorecard_html("GEO Score", f'{scorecards.get("geo_score", "—")}/100' if scorecards.get("geo_score") is not None else "—", _score_class(scorecards.get("geo_score")))
+        + _scorecard_html("Issues críticas", scorecards.get("issues_critical", 0), "bad" if scorecards.get("issues_critical", 0) > 0 else "good")
+        + _scorecard_html("Keywords rankeando", scorecards.get("keywords_ranking", 0))
+        + "</div>"
+    )
+    tecnico_html = (
+        f'<p>🟢 {tech_summary.get("green", 0)} · 🟡 {tech_summary.get("yellow", 0)} · 🔴 {tech_summary.get("red", 0)} (celdas del semáforo, todas las páginas)</p>'
+        f'<table><thead><tr><th>Check</th><th>Verde</th><th>Amarillo</th><th>Rojo</th></tr></thead><tbody>{tech_by_check_block}</tbody></table>'
+    )
+
+    sections: list[tuple[str, str, str]] = [
+        ("resumen", "📋 Resumen Ejecutivo", resumen_html),
+        ("scorecards", "📊 Scorecards", scorecards_html),
+        ("keywords", "🔑 Keywords Principales (Search Console real)", keywords_block),
+        ("preguntas", "❓ Preguntas reales de Google (Autocomplete)", question_ideas_block),
+        ("oportunidades", "🎯 Oportunidades cerca del Top 10 (posición 11-20 real)", opp_block),
+        ("ideas-contenido", "💡 Ideas de Contenido", content_ideas_block),
+        ("action-critico", f"🔴 Action Plan — Crítico ({len(critical)})", _issue_rows(critical)),
+        ("action-alta", f"🟡 Action Plan — Alta ({len(high)})", _issue_rows(high)),
+        ("action-media", f"🟢 Action Plan — Media ({len(medium)})", _issue_rows(medium)),
+        ("tecnico", "🔧 Técnico", tecnico_html),
+        ("js-rendering", "🖥️ Crawler propio vs renderizado con JS (DataForSEO On-Page)", js_rendering_block),
+        ("security-headers", "🔒 Headers de seguridad HTTP", security_headers_block),
+        ("indexnow", "📡 IndexNow (Bing/Yandex/Seznam/Naver)", indexnow_block),
+        ("contenido-eeat", "📝 Contenido y E-E-A-T por página", content_block),
+        ("extraibilidad-ia", "🧠 Extraíbilidad por IA y densidad de datos", ai_extractability_block),
+        ("cwv", "⚡ Core Web Vitals por página (PageSpeed Insights real)", cwv_block),
+        ("cobertura", "🗺️ Cobertura: sitemap ↔ crawleado ↔ indexado", coverage_block),
+        ("indexacion", "🔍 Indexación real en Google (URL Inspection API)", indexation_block),
+        ("ranking", "🎯 Ranking real en Google (búsqueda en vivo, no promedio de GSC)", rank_block),
+        ("ctr", "👆 CTR real por posición (baseline propio, sin curvas de industria)", ctr_block),
+        ("share-of-voice", "📢 Share of Voice (sobre tu propio baseline de CTR)", sov_block),
+        ("geo-crawlers", "🤖 GEO / Acceso de crawlers de IA", geo_block),
+        ("ai-visibility", "🧠 AI Visibility — qué responden Gemini/Claude/DeepSeek en vivo", ai_visibility_block),
+        ("ai-overview", "🌐 AI Overview real de Google (SERP en vivo)", ai_overview_block),
+        ("seo-local", "📍 SEO Local", local_block),
+        ("local-pack", "🗺️ Local Pack de Google Maps (posición, rating y reseñas reales)", local_pack_block),
+        ("geo-grid", "📍 Geo-grid rank tracking (visibilidad local por punto geográfico)", geo_grid_block),
+        ("serp-real", "🔎 SERP real — contra quién competimos de verdad", serp_block),
+        ("competidores", "🎯 Competidores", competitors_block),
+        ("keyword-gaps", "🔑 Gap real de keywords vs competidor (DataForSEO Labs)", competitor_keyword_gaps_block),
+        ("backlinks", "🔗 Backlinks", backlinks_block),
+        ("backlinks-toxicos", "☠️ Backlinks tóxicos por patrón", toxic_backlinks_block),
+        ("ga4", "📊 GA4 — conversiones orgánicas reales", ga4_block),
+        ("no-medimos", "❓ Lo que NO medimos todavía (honestidad explícita)", not_available_block),
+    ]
+
+    toc_html = "".join(f'<li><a href="#{sid}">{_esc(title)}</a></li>' for sid, title, _body in sections)
+    sections_html = "".join(
+        f'<section class="report-section" id="{sid}">'
+        f'<div class="section-head"><h2>{title}</h2>'
+        f'<button class="section-copy-btn" onclick="copySection(\'{sid}\')">📋 Copiar sección</button></div>'
+        f'{body}</section>\n'
+        for sid, title, body in sections
+    )
+
     return f"""<!doctype html>
 <html lang="es">
 <head>
@@ -1113,7 +1179,7 @@ async def generate_html_report(project: dict) -> str:
   :root {{ color-scheme: light; }}
   body {{ font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; color: #1a1f2b; background: #f7f8fa; max-width: 960px; margin: 0 auto; padding: 32px 24px; line-height: 1.5; }}
   h1 {{ font-size: 24px; margin-bottom: 2px; }}
-  h2 {{ font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em; color: #444; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; margin-top: 32px; display:flex; align-items:center; gap:8px; }}
+  h2 {{ font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em; color: #444; margin: 0; padding: 0; border: none; display:flex; align-items:center; gap:8px; }}
   .subtitle {{ color: #666; font-size: 13px; margin-bottom: 24px; }}
   .scorecards {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 16px 0; }}
   .scorecard {{ background:#fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }}
@@ -1143,8 +1209,18 @@ async def generate_html_report(project: dict) -> str:
   .summary-box li {{ margin-bottom:6px; font-size:13px; }}
   .print-btn {{ background: #2563eb; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 13px; }}
   .copy-btn {{ background: #16a34a; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 13px; margin-left: 8px; }}
+  .report-section {{ margin-top: 32px; }}
+  .section-head {{ display:flex; align-items:center; justify-content:space-between; gap:10px; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }}
+  .section-copy-btn {{ background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; border-radius:6px; padding:4px 10px; font-size:11px; cursor:pointer; white-space:nowrap; flex-shrink:0; }}
+  .section-copy-btn:hover {{ background:#e0e7ff; }}
+  .toc-box {{ background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:14px 18px; margin-bottom:24px; }}
+  .toc-box summary {{ cursor:pointer; font-size:13px; font-weight:600; color:#333; }}
+  .toc-box ul {{ list-style:none; columns:2; margin:12px 0 0; padding:0; font-size:12px; }}
+  .toc-box li {{ margin-bottom:5px; break-inside: avoid; }}
+  .toc-box a {{ color:#2563eb; text-decoration:none; }}
+  .toc-box a:hover {{ text-decoration:underline; }}
   @media print {{
-    .print-btn, .copy-btn {{ display: none; }}
+    .print-btn, .copy-btn, .section-copy-btn, .toc-box {{ display: none; }}
     body {{ padding: 0; background:#fff; }}
   }}
 </style>
@@ -1185,123 +1261,45 @@ async def generate_html_report(project: dict) -> str:
         btn.textContent = '❌ No se pudo copiar — selecciona el texto manualmente';
       }});
     }}
+    // Copia SOLO una sección (título + contenido, nada más) — así al pegarla en
+    // una IA el primer renglón ya dice qué sección es, sin gastar tokens con el
+    // reporte completo (§ 2026-08-28, pedido real: el reporte entero quemaba
+    // demasiados tokens al pegarlo completo en una conversación de IA).
+    function copySection(id) {{
+      const el = document.getElementById(id);
+      if (!el) return;
+      const btn = el.querySelector('.section-copy-btn');
+      const original = btn ? btn.textContent : null;
+      // innerText necesita que el elemento tenga layout real (un nodo clonado y
+      // desconectado del DOM devuelve texto vacío o inconsistente según el
+      // navegador) — así que en vez de clonar, se oculta el botón un instante
+      // dentro del elemento YA renderizado, para que su texto ("Copiar sección")
+      // no se cuele en lo copiado, y se restaura enseguida.
+      const prevDisplay = btn ? btn.style.display : null;
+      if (btn) btn.style.display = 'none';
+      const text = el.innerText;
+      if (btn) btn.style.display = prevDisplay;
+      copyTextToClipboard(text).then(() => {{
+        if (btn) {{
+          btn.textContent = '✅ Copiado';
+          setTimeout(() => {{ btn.textContent = original; }}, 2000);
+        }}
+      }}).catch(() => {{
+        if (btn) btn.textContent = '❌ No se pudo copiar';
+      }});
+    }}
   </script>
   <div id="report-content">
   <h1>Reporte SEO — {_esc(project["name"])}</h1>
   <div class="subtitle">{_esc(project["url"])} · SEO-OS — cada número de abajo viene de una fuente real o dice "sin datos"</div>
   {freshness_banner}
 
-  <h2>📋 Resumen Ejecutivo</h2>
-  <div class="summary-box">
-    <ul>{summary_block}</ul>
-    {summary_note}
-  </div>
+  <details class="toc-box" open>
+    <summary>📑 Índice — {len(sections)} secciones. Usa "Copiar sección" en cada una en vez de "Copiar todo" para no quemar tokens de más al pegarle el reporte a una IA.</summary>
+    <ul>{toc_html}</ul>
+  </details>
 
-  <h2>📊 Scorecards</h2>
-  <div class="scorecards">
-    {_scorecard_html("SEO Score", f'{scorecards.get("seo_score", "—")}/100' if scorecards.get("seo_score") is not None else "—", _score_class(scorecards.get("seo_score")))}
-    {_scorecard_html("GEO Score", f'{scorecards.get("geo_score", "—")}/100' if scorecards.get("geo_score") is not None else "—", _score_class(scorecards.get("geo_score")))}
-    {_scorecard_html("Issues críticas", scorecards.get("issues_critical", 0), "bad" if scorecards.get("issues_critical", 0) > 0 else "good")}
-    {_scorecard_html("Keywords rankeando", scorecards.get("keywords_ranking", 0))}
-  </div>
-
-  <h2>🔑 Keywords Principales (Search Console real)</h2>
-  {keywords_block}
-
-  <h2>❓ Preguntas reales de Google (Autocomplete)</h2>
-  {question_ideas_block}
-
-  <h2>🎯 Oportunidades cerca del Top 10 (posición 11-20 real)</h2>
-  {opp_block}
-
-  <h2>💡 Ideas de Contenido</h2>
-  {content_ideas_block}
-
-  <h2>🔴 Action Plan — Crítico ({len(critical)})</h2>
-  {_issue_rows(critical)}
-
-  <h2>🟡 Action Plan — Alta ({len(high)})</h2>
-  {_issue_rows(high)}
-
-  <h2>🟢 Action Plan — Media ({len(medium)})</h2>
-  {_issue_rows(medium)}
-
-  <h2>🔧 Técnico</h2>
-  <p>🟢 {tech_summary.get("green", 0)} · 🟡 {tech_summary.get("yellow", 0)} · 🔴 {tech_summary.get("red", 0)} (celdas del semáforo, todas las páginas)</p>
-  <table><thead><tr><th>Check</th><th>Verde</th><th>Amarillo</th><th>Rojo</th></tr></thead><tbody>{tech_by_check_block}</tbody></table>
-
-  <h2>🖥️ Crawler propio vs renderizado con JS (DataForSEO On-Page)</h2>
-  {js_rendering_block}
-
-  <h2>🔒 Headers de seguridad HTTP</h2>
-  {security_headers_block}
-
-  <h2>📡 IndexNow (Bing/Yandex/Seznam/Naver)</h2>
-  {indexnow_block}
-
-  <h2>📝 Contenido y E-E-A-T por página</h2>
-  {content_block}
-
-  <h2>🧠 Extraíbilidad por IA y densidad de datos</h2>
-  {ai_extractability_block}
-
-  <h2>⚡ Core Web Vitals por página (PageSpeed Insights real)</h2>
-  {cwv_block}
-
-  <h2>🗺️ Cobertura: sitemap ↔ crawleado ↔ indexado</h2>
-  {coverage_block}
-
-  <h2>🔍 Indexación real en Google (URL Inspection API)</h2>
-  {indexation_block}
-
-  <h2>🎯 Ranking real en Google (búsqueda en vivo, no promedio de GSC)</h2>
-  {rank_block}
-
-  <h2>👆 CTR real por posición (baseline propio, sin curvas de industria)</h2>
-  {ctr_block}
-
-  <h2>📢 Share of Voice (sobre tu propio baseline de CTR)</h2>
-  {sov_block}
-
-  <h2>🤖 GEO / Acceso de crawlers de IA</h2>
-  {geo_block}
-
-  <h2>🧠 AI Visibility — qué responden Gemini/Claude/DeepSeek en vivo</h2>
-  {ai_visibility_block}
-
-  <h2>🌐 AI Overview real de Google (SERP en vivo)</h2>
-  {ai_overview_block}
-
-  <h2>📍 SEO Local</h2>
-  {local_block}
-
-  <h2>🗺️ Local Pack de Google Maps (posición, rating y reseñas reales)</h2>
-  {local_pack_block}
-
-  <h2>📍 Geo-grid rank tracking (visibilidad local por punto geográfico)</h2>
-  {geo_grid_block}
-
-  <h2>🔎 SERP real — contra quién competimos de verdad</h2>
-  {serp_block}
-
-  <h2>🎯 Competidores</h2>
-  {competitors_block}
-
-  <h2>🔑 Gap real de keywords vs competidor (DataForSEO Labs)</h2>
-  {competitor_keyword_gaps_block}
-
-  <h2>🔗 Backlinks</h2>
-  {backlinks_block}
-
-  <h2>☠️ Backlinks tóxicos por patrón</h2>
-  {toxic_backlinks_block}
-
-  <h2>📊 GA4 — conversiones orgánicas reales</h2>
-  {ga4_block}
-
-  <h2>❓ Lo que NO medimos todavía (honestidad explícita)</h2>
-  {not_available_block}
-
+  {sections_html}
   <p class="muted" style="margin-top:40px;">Generado automáticamente por SEO-OS. Los datos reflejan el <strong>último crawl del sitio ({_esc(last_crawl_display or "sin crawl aún")})</strong>, no el momento en que se generó este reporte — no son en tiempo real. Para datos frescos, ejecuta una auditoría antes de generar el reporte. Ningún número de este reporte fue inventado: lo que no se pudo medir se declara arriba.</p>
   </div>
 </body>

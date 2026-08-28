@@ -25,6 +25,39 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Reporte HTML dividido en 34 secciones copiables por separado (2026-08-28)
+
+Bug real reportado por el usuario: el reporte HTML había crecido a ~880KB de
+texto (34 secciones — Técnico, Backlinks, Geo-grid, AI Overview, etc.) en un
+solo bloque. El único botón para llevarlo a una IA era "Copiar todo", así que
+cada consulta a Claude sobre el reporte quemaba cientos de miles de tokens
+de golpe, y no había forma de ver de un vistazo qué secciones existían antes
+de decidir cuál pegar.
+
+- Cada `<h2>` ahora vive dentro de `<section id="...">` con su propio botón
+  "📋 Copiar sección" — copia SOLO esa sección (con el título como primera
+  línea, para que quien la pegue en una IA sepa de inmediato qué está viendo
+  sin tener que pegar las otras 33). El botón temporalmente oculta su propio
+  texto antes de leer `innerText` para no colarse en lo copiado (clonar el
+  nodo no sirve: un clon desconectado del DOM no tiene layout, así que
+  `innerText` devuelve vacío/inconsistente según el navegador).
+- Un índice (`<details class="toc-box">`, abierto por defecto) justo debajo
+  del banner de frescura lista las 34 secciones con enlaces `#ancla` — antes
+  de esto no había ninguna vista de conjunto del reporte completo.
+- El botón "Copiar todo" original se mantiene para cuando sí se necesita
+  todo.
+- Efecto secundario esperado: los tests que hacían `html.find("título de
+  sección")` para ubicar una sección ahora encontraban primero la MISMA
+  cadena de texto en el índice (que aparece antes en el documento). Se
+  corrigieron buscando `<h2>{emoji} título` en vez del texto plano, que solo
+  aparece una vez en el documento.
+- Verificado en vivo generando el reporte real de `jcreparaciones.com`: las
+  34 secciones y sus 34 anclas del índice coinciden exactamente, y
+  `copySection()` sobre la sección de geo-grid devuelve el título primero y
+  sin ruido del botón.
+- Test suite: 738 → 738 (sin tests nuevos — se reescribieron 14 existentes
+  para apuntar al `<h2>` real en vez del texto plano ahora ambiguo).
+
 ### SEO Score global con desglose por componente (2026-07-15)
 
 - **`calculate_content_score()`** (nuevo en `backend/analyzers/opportunities.py`):

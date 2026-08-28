@@ -522,7 +522,7 @@ async def test_reporte_incluye_extractabilidad_y_densidad_de_datos():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-extractabilidad"))
 
-    section_idx = html.find("Extraíbilidad por IA y densidad de datos")
+    section_idx = html.find("<h2>🧠 Extraíbilidad por IA y densidad de datos")
     assert section_idx != -1
     idx = html.find("reporte-test.com/preguntas", section_idx)
     assert idx != -1
@@ -587,7 +587,7 @@ async def test_reporte_share_of_voice_declara_muestra_insuficiente():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-sov-insuficiente"))
 
-    section_idx = html.find("Share of Voice")
+    section_idx = html.find("<h2>📢 Share of Voice")
     assert section_idx != -1
     assert "no alcanza" in html[section_idx:section_idx + 500]
 
@@ -623,7 +623,7 @@ async def test_reporte_incluye_headers_de_seguridad():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-security-headers"))
 
-    section_idx = html.find("Headers de seguridad HTTP")
+    section_idx = html.find("<h2>🔒 Headers de seguridad HTTP")
     assert section_idx != -1
     section = html[section_idx:section_idx + 1200]
     assert "max-age=31536000" in section
@@ -651,7 +651,7 @@ async def test_reporte_incluye_indexnow_no_configurado():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-indexnow"))
 
-    section_idx = html.find("IndexNow (Bing")
+    section_idx = html.find("<h2>📡 IndexNow (Bing")
     assert section_idx != -1
     assert "No configurado todavía" in html[section_idx:section_idx + 500]
 
@@ -765,7 +765,7 @@ async def test_reporte_incluye_backlinks_toxicos():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-backlinks-toxicos"))
 
-    section_idx = html.find("Backlinks tóxicos por patrón")
+    section_idx = html.find("<h2>☠️ Backlinks tóxicos por patrón")
     assert section_idx != -1
     section = html[section_idx:section_idx + 1000]
     assert "spam-network.xyz" in section
@@ -788,7 +788,7 @@ async def test_reporte_backlinks_toxicos_declara_muestra_insuficiente():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-backlinks-toxicos-insuficiente"))
 
-    section_idx = html.find("Backlinks tóxicos por patrón")
+    section_idx = html.find("<h2>☠️ Backlinks tóxicos por patrón")
     assert section_idx != -1
     assert "no alcanza" in html[section_idx:section_idx + 500]
 
@@ -816,7 +816,7 @@ async def test_reporte_incluye_gap_real_de_keywords_vs_competidor():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-competitor-keyword-gaps"))
 
-    section_idx = html.find("Gap real de keywords vs competidor")
+    section_idx = html.find("<h2>🔑 Gap real de keywords vs competidor")
     assert section_idx != -1
     section = html[section_idx:section_idx + 800]
     assert "competidor-real.com" in section
@@ -834,7 +834,7 @@ async def test_reporte_gap_de_keywords_declara_no_consultado_sin_snapshot():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-competitor-keyword-gaps-vacio"))
 
-    section_idx = html.find("Gap real de keywords vs competidor")
+    section_idx = html.find("<h2>🔑 Gap real de keywords vs competidor")
     assert section_idx != -1
     section = html[section_idx:section_idx + 500]
     assert "nunca-consultado.com" in section
@@ -860,7 +860,7 @@ async def test_reporte_incluye_geo_grid():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-geo-grid"))
 
-    section_idx = html.find("Geo-grid rank tracking")
+    section_idx = html.find("<h2>📍 Geo-grid rank tracking")
     assert section_idx != -1
     section = html[section_idx:section_idx + 500]
     assert "reparacion celulares cali" in section
@@ -874,7 +874,7 @@ async def test_reporte_geo_grid_declara_sin_datos():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-geo-grid-vacio"))
 
-    section_idx = html.find("Geo-grid rank tracking")
+    section_idx = html.find("<h2>📍 Geo-grid rank tracking")
     assert section_idx != -1
     assert "Sin datos" in html[section_idx:section_idx + 300]
 
@@ -901,9 +901,9 @@ async def test_reporte_incluye_js_rendering_check():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-js-rendering"))
 
-    section_idx = html.find("Crawler propio vs renderizado con JS")
+    section_idx = html.find("<h2>🖥️ Crawler propio vs renderizado con JS")
     assert section_idx != -1
-    section = html[section_idx:section_idx + 700]
+    section = html[section_idx:section_idx + 900]
     assert "3301" in section
     assert "2187" in section
     assert "Ningún gap significativo" in section
@@ -915,7 +915,7 @@ async def test_reporte_js_rendering_declara_sin_datos():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-js-rendering-vacio"))
 
-    section_idx = html.find("Crawler propio vs renderizado con JS")
+    section_idx = html.find("<h2>🖥️ Crawler propio vs renderizado con JS")
     assert section_idx != -1
     assert "Sin comparación todavía" in html[section_idx:section_idx + 300]
 
@@ -942,7 +942,7 @@ async def test_reporte_incluye_ai_overview_real():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-ai-overview"))
 
-    section_idx = html.find("AI Overview real de Google")
+    section_idx = html.find("<h2>🌐 AI Overview real de Google")
     assert section_idx != -1
     section = html[section_idx:section_idx + 1000]
     assert "1 de 2" in section
@@ -957,6 +957,6 @@ async def test_reporte_ai_overview_declara_sin_datos():
     with _mock_provider():
         html = await generate_html_report(get_project_or_404("test-report-ai-overview-vacio"))
 
-    section_idx = html.find("AI Overview real de Google")
+    section_idx = html.find("<h2>🌐 AI Overview real de Google")
     assert section_idx != -1
     assert "Sin consulta todavía" in html[section_idx:section_idx + 300]
