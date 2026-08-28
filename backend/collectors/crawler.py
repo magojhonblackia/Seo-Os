@@ -728,39 +728,62 @@ class TechnicalCrawler(BaseCollector):
 
         with get_connection() as conn:
             for raw in raw_pages:
-                page_data = PageData(
-                    url=raw["url"],
-                    title=raw.get("title"),
-                    meta_description=raw.get("meta_description"),
-                    h1_tags=raw.get("h1_tags", []),
-                    schema_types=raw.get("schema_types", []),
-                    schema_has_errors=raw.get("schema_has_errors", False),
-                    og=raw.get("og", {}),
-                    canonical=raw.get("canonical"),
-                    is_indexable=raw.get("is_indexable", True),
-                    lang_declared=expected_lang,
-                    x_robots_tag=raw.get("x_robots_tag"),
-                )
-                report = analyze_page(page_data)
+                # § mejoras 2026-08-28 (hallazgo real de una auditoría manual
+                # contra jcreparaciones.com): una URL 404 real (link interno
+                # muerto, entrada vieja de sitemap/índice de Google) devuelve
+                # 200-de-facto en el sentido de que httpx SÍ trae HTML — el
+                # de la página de error compartida de Next.js. Sin este gate,
+                # esa plantilla se analizaba como si fuera contenido real de
+                # CADA URL rota, generando issues de "meta description corta",
+                # "legibilidad baja", "doble sufijo de marca", etc. — todas
+                # describiendo el MISMO template genérico repetido, no un
+                # problema real de contenido. La URL rota en sí YA se reporta
+                # una sola vez, agregada, vía find_broken_pages/site_health —
+                # no hace falta (ni es honesto) además analizarle el "contenido".
+                is_broken = isinstance(raw.get("status_code"), int) and raw["status_code"] >= 400
 
-                readability_score = flesch_huerta_score(raw.get("body_text_sample", ""))
-                eeat_signals = EeatSignals(
-                    has_author=raw.get("has_author", False),
-                    has_date=raw.get("has_date", False),
-                    is_https=raw["url"].startswith("https://"),
-                    has_contact=raw.get("has_contact", False),
-                    word_count=raw.get("word_count", 0),
-                )
-                eeat_score, _eeat_breakdown = calculate_eeat_score(eeat_signals)
-                content_issues = build_content_issues(raw["url"], readability_score, eeat_score, eeat_signals)
-                answer_extractability = raw.get("answer_extractability") or {}
-                content_issues += build_answer_extractability_issues(raw["url"], answer_extractability)
-                fact_density = raw.get("fact_density") or {}
-                content_issues += build_fact_density_issues(raw["url"], fact_density)
-                content_issues += build_freshness_issues(
-                    raw["url"], raw.get("schema_date_modified"), raw.get("http_last_modified")
-                )
-                content_issues += build_banned_phrase_issues(raw["url"], raw.get("banned_phrases_found") or [])
+                if is_broken:
+                    report_issues: list = []
+                    content_issues: list = []
+                    readability_score = None
+                    eeat_score = None
+                    eeat_signals = EeatSignals(has_author=False, has_date=False, is_https=raw["url"].startswith("https://"), has_contact=False, word_count=0)
+                    answer_extractability: dict = {}
+                    fact_density: dict = {}
+                else:
+                    page_data = PageData(
+                        url=raw["url"],
+                        title=raw.get("title"),
+                        meta_description=raw.get("meta_description"),
+                        h1_tags=raw.get("h1_tags", []),
+                        schema_types=raw.get("schema_types", []),
+                        schema_has_errors=raw.get("schema_has_errors", False),
+                        og=raw.get("og", {}),
+                        canonical=raw.get("canonical"),
+                        is_indexable=raw.get("is_indexable", True),
+                        lang_declared=expected_lang,
+                        x_robots_tag=raw.get("x_robots_tag"),
+                    )
+                    report_issues = analyze_page(page_data).issues
+
+                    readability_score = flesch_huerta_score(raw.get("body_text_sample", ""))
+                    eeat_signals = EeatSignals(
+                        has_author=raw.get("has_author", False),
+                        has_date=raw.get("has_date", False),
+                        is_https=raw["url"].startswith("https://"),
+                        has_contact=raw.get("has_contact", False),
+                        word_count=raw.get("word_count", 0),
+                    )
+                    eeat_score, _eeat_breakdown = calculate_eeat_score(eeat_signals)
+                    content_issues = build_content_issues(raw["url"], readability_score, eeat_score, eeat_signals)
+                    answer_extractability = raw.get("answer_extractability") or {}
+                    content_issues += build_answer_extractability_issues(raw["url"], answer_extractability)
+                    fact_density = raw.get("fact_density") or {}
+                    content_issues += build_fact_density_issues(raw["url"], fact_density)
+                    content_issues += build_freshness_issues(
+                        raw["url"], raw.get("schema_date_modified"), raw.get("http_last_modified")
+                    )
+                    content_issues += build_banned_phrase_issues(raw["url"], raw.get("banned_phrases_found") or [])
 
                 existing = conn.execute(
                     select(pages.c.id).where(
@@ -768,24 +791,29 @@ class TechnicalCrawler(BaseCollector):
                     )
                 ).first()
                 now = now_iso()
+                # Para páginas rotas, no se guarda título/meta/H1/word_count:
+                # ese texto es el de la plantilla de error compartida, no
+                # contenido real de esta URL — guardarlo como si lo fuera
+                # contaminaría promedios y agregados del reporte (ver comentario
+                # arriba de is_broken).
                 page_values = {
                     "project_id": self.project["id"],
                     "url": raw["url"],
                     "last_crawled": now,
                     "status_code": raw.get("status_code"),
-                    "title": raw.get("title"),
-                    "meta_description": raw.get("meta_description"),
-                    "h1": " | ".join(raw.get("h1_tags", [])) or None,
+                    "title": None if is_broken else raw.get("title"),
+                    "meta_description": None if is_broken else raw.get("meta_description"),
+                    "h1": None if is_broken else (" | ".join(raw.get("h1_tags", [])) or None),
                     "canonical": raw.get("canonical"),
                     "robots_meta": None,
-                    "schema_types": raw.get("schema_types", []),
-                    "og": raw.get("og", {}),
-                    "word_count": raw.get("word_count"),
+                    "schema_types": [] if is_broken else raw.get("schema_types", []),
+                    "og": {} if is_broken else raw.get("og", {}),
+                    "word_count": None if is_broken else raw.get("word_count"),
                     "lang_detected": raw.get("lang_declared"),
                     "is_indexable": raw.get("is_indexable", True),
                     "x_robots_tag": raw.get("x_robots_tag"),
                     "redirected_to": raw.get("redirected_to"),
-                    "readability_score": round(readability_score),
+                    "readability_score": None if readability_score is None else round(readability_score),
                     "eeat_score": eeat_score,
                     "has_author": eeat_signals.has_author,
                     "has_date": eeat_signals.has_date,
@@ -812,7 +840,7 @@ class TechnicalCrawler(BaseCollector):
                     page_values["first_seen"] = now
                     page_id = conn.execute(insert(pages).values(**page_values)).inserted_primary_key[0]
 
-                page_issues = [*report.issues, *content_issues]
+                page_issues = [*report_issues, *content_issues]
                 for mago_issue in page_issues:
                     created = record_issue(
                         conn,

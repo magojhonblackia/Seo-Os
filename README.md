@@ -1205,6 +1205,40 @@ checks son anteriores a esta función, no tienen el dato retroactivo).
 
 Suite: 671 tests.
 
+### Páginas 404 dejan de analizarse como si fueran contenido real (2026-08-28)
+
+Encontrado por el usuario en una sesión separada, auditando manualmente un
+reporte de SEO-OS contra jcreparaciones.com: 2 URLs muertas
+(`/cambio-bateria-macbook-cali`, `/reparacion-iphone`, sin ningún link
+entrante real desde hace tiempo) devolvían el HTML de la página de error
+COMPARTIDA de Next.js — y el crawler la analizaba como si fuera contenido
+real de CADA URL rota, generando issues falsas de meta description corta,
+noindex, doble sufijo de marca, legibilidad 25.6, contenido delgado y sin
+fecha — todas describiendo el MISMO template genérico repetido, no un
+problema real. 12 issues falsas confirmadas abiertas en jc con este patrón.
+
+Causa raíz: `crawl_site()`/`_extract_page_data()` nunca miraban
+`response.status_code` — cualquier HTML que httpx trajera (200 o 404) se
+analizaba igual. `TechnicalCrawler.persist_analysis()` ahora comprueba
+`status_code >= 400` antes de correr el análisis técnico/de contenido: para
+una página rota, NO genera `report.issues` ni `content_issues` (readability,
+E-E-A-T, M11, M12, frescura, frases prohibidas), y guarda `title`/
+`meta_description`/`h1`/`word_count`/`readability_score` como `None` en vez
+del texto de la plantilla de error — evita contaminar promedios y agregados
+del reporte con copias del mismo template. El hallazgo de "esta URL da 404"
+en sí ya se reportaba correctamente, una sola vez y agregado, vía
+`find_broken_pages`/`site_health.py` — no se duplicaba, solo faltaba dejar
+de generar ruido alrededor.
+
+Verificado en vivo contra jc: las 2 URLs reales con este problema, con las
+12 issues falsas reales ya abiertas. Como esas páginas ya no tienen ningún
+link entrante (no se re-crawlean, la reconciliación normal solo corre sobre
+páginas que sí se vuelven a visitar), las 12 issues no se iban a cerrar
+solas — se resolvieron a mano con `reconcile_page_issues()` (mismo mecanismo
+que usa el sistema, no un hack por fuera).
+
+Suite: 673 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

@@ -594,3 +594,99 @@ def test_build_freshness_issues_no_reporta_si_falta_cualquiera_de_los_dos():
     assert build_freshness_issues("https://x.com/a", "2026-06-02", None) == []
     assert build_freshness_issues("https://x.com/a", None, "Tue, 02 Jun 2026 15:00:00 GMT") == []
     assert build_freshness_issues("https://x.com/a", None, None) == []
+
+
+# ---------- Páginas rotas no se analizan como si fueran contenido real (§ mejoras 2026-08-28) ----------
+
+def _mk_project_for_persist(slug: str) -> int:
+    with get_connection() as conn:
+        return conn.execute(
+            insert(projects).values(
+                slug=slug, name="Persist Test", url="https://persist-test.com",
+                gsc_property="sc-domain:persist-test.com", country="CO", language="es",
+                competitors=[], is_active=True, config={}, created_at=now_iso(),
+            )
+        ).inserted_primary_key[0]
+
+
+def _mk_snapshot(project_id: int, collector: str = "crawler") -> int:
+    with get_connection() as conn:
+        return conn.execute(
+            insert(snapshots).values(
+                project_id=project_id, collector=collector, status="ok",
+                started_at=now_iso(), finished_at=now_iso(), raw_data={}, created_at=now_iso(),
+            )
+        ).inserted_primary_key[0]
+
+
+def test_persist_analysis_no_genera_issues_de_contenido_para_pagina_404():
+    """Hallazgo real de una auditoría manual contra jcreparaciones.com
+    (2026-08-28): una URL 404 real (link interno muerto, entrada vieja de
+    sitemap) devuelve el HTML de la página de error COMPARTIDA de Next.js —
+    sin este gate, esa plantilla se analiza como si fuera el contenido real
+    de cada URL rota (meta corta, legibilidad baja, doble sufijo...), todo
+    describiendo el mismo template genérico repetido, no un problema real."""
+    from backend.collectors.crawler import TechnicalCrawler
+
+    pid = _mk_project_for_persist("test-persist-404")
+    snapshot_id = _mk_snapshot(pid)
+    crawler = TechnicalCrawler("test-persist-404")
+
+    raw_pages = [
+        {
+            "url": "https://persist-test.com/pagina-que-ya-no-existe",
+            "status_code": 404,
+            "title": "X",  # deliberadamente corto/pobre — probaría que SÍ se ignora
+            "meta_description": "corto",
+            "h1_tags": [],
+            "word_count": 5,
+            "is_indexable": True,
+            "has_author": False, "has_date": False, "has_contact": False,
+            "body_text_sample": "Página no encontrada",
+        }
+    ]
+    summary = crawler.persist_analysis(snapshot_id, raw_pages)
+    assert summary["issues_created"] == 0
+
+    with get_connection() as conn:
+        row = conn.execute(
+            select(pages).where(pages.c.project_id == pid, pages.c.url == raw_pages[0]["url"])
+        ).first()
+    assert row.status_code == 404
+    assert row.title is None
+    assert row.meta_description is None
+    assert row.word_count is None
+    assert row.readability_score is None
+
+
+def test_persist_analysis_pagina_200_normal_si_sigue_generando_issues():
+    """Control: el gate solo aplica a 4xx/5xx — una página real (200) con un
+    problema real sigue generando su issue normalmente."""
+    from backend.collectors.crawler import TechnicalCrawler
+
+    pid = _mk_project_for_persist("test-persist-200-normal")
+    snapshot_id = _mk_snapshot(pid)
+    crawler = TechnicalCrawler("test-persist-200-normal")
+
+    raw_pages = [
+        {
+            "url": "https://persist-test.com/pagina-real",
+            "status_code": 200,
+            "title": "X",  # title fuera de rango -> issue real esperado
+            "meta_description": None,
+            "h1_tags": ["Único H1"],
+            "word_count": 500,
+            "is_indexable": True,
+            "has_author": True, "has_date": True, "has_contact": True,
+            "body_text_sample": "Contenido real de la página, con suficiente longitud.",
+        }
+    ]
+    summary = crawler.persist_analysis(snapshot_id, raw_pages)
+    assert summary["issues_created"] > 0
+
+    with get_connection() as conn:
+        row = conn.execute(
+            select(pages).where(pages.c.project_id == pid, pages.c.url == raw_pages[0]["url"])
+        ).first()
+    assert row.status_code == 200
+    assert row.title == "X"  # sí se guarda el contenido real
