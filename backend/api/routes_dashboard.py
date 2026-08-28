@@ -32,6 +32,7 @@ from backend.api.deps import get_project_or_404
 from backend.db.database import gsc_daily_totals_last_n_days, get_connection, latest_gsc_query_date, now_iso
 from backend.db.schema import (
     backlinks,
+    geo_grid_rankings,
     gsc_daily,
     gsc_queries,
     indexation_status,
@@ -550,6 +551,49 @@ def get_local_pack(project: dict = Depends(get_project_or_404)) -> dict:
         ).all()
 
     return {"rows": [dict(r._mapping) for r in rows], "date": latest_date}
+
+
+@router.get("/{slug}/geo-grid")
+def get_geo_grid(project: dict = Depends(get_project_or_404)) -> dict:
+    """Visibilidad en el Local Pack de Maps por PUNTO geográfico, no un solo
+    punto (§ mejoras 2026-08-28) — mismo concepto que Local Falcon. Disparo
+    manual, ver backend/collectors/geo_grid.py."""
+    pid = project["id"]
+    with get_connection() as conn:
+        latest_date = conn.execute(
+            select(func.max(geo_grid_rankings.c.date)).where(geo_grid_rankings.c.project_id == pid)
+        ).scalar()
+        if not latest_date:
+            return {
+                "keywords": [], "date": None,
+                "empty_reason": "Sin datos aún — ejecuta el collector 'geo_grid' (requiere DataForSEO configurado).",
+            }
+
+        rows = conn.execute(
+            select(geo_grid_rankings)
+            .where(geo_grid_rankings.c.project_id == pid, geo_grid_rankings.c.date == latest_date)
+        ).all()
+
+    by_keyword: dict[str, list] = {}
+    for r in rows:
+        by_keyword.setdefault(r.keyword, []).append(r)
+
+    keywords_out = []
+    for keyword, kw_rows in by_keyword.items():
+        in_pack = [r for r in kw_rows if r.our_position is not None]
+        positions = [r.our_position for r in in_pack]
+        keywords_out.append({
+            "keyword": keyword,
+            "grid_points": len(kw_rows),
+            "visibility_pct": round(100 * len(in_pack) / len(kw_rows), 1) if kw_rows else None,
+            "avg_position_where_visible": round(sum(positions) / len(positions), 1) if positions else None,
+            "points": [
+                {"lat": r.grid_lat, "lng": r.grid_lng, "our_position": r.our_position, "our_listing_title": r.our_listing_title}
+                for r in kw_rows
+            ],
+        })
+
+    return {"keywords": keywords_out, "date": latest_date}
 
 
 @router.get("/{slug}/geo")

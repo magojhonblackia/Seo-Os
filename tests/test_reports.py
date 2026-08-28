@@ -11,7 +11,7 @@ from sqlalchemy import insert
 
 from backend.api.deps import get_project_or_404
 from backend.db.database import get_connection, now_iso
-from backend.db.schema import ai_visibility_checks, backlinks, gsc_daily, gsc_queries, issues, keywords, pages, projects, scores, snapshots
+from backend.db.schema import ai_visibility_checks, backlinks, geo_grid_rankings, gsc_daily, gsc_queries, issues, keywords, pages, projects, scores, snapshots
 from backend.main import app
 from backend.reports import generate_html_report
 
@@ -834,3 +834,41 @@ async def test_reporte_gap_de_keywords_declara_no_consultado_sin_snapshot():
     section = html[section_idx:section_idx + 500]
     assert "nunca-consultado.com" in section
     assert "Nunca consultado" in section
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_geo_grid():
+    """§ mejoras 2026-08-28: geo-grid rank tracking (DataForSEO Maps SERP,
+    pedido explícito del usuario) — visibilidad por punto geográfico, no un
+    solo punto como Local Pack."""
+    project = _make_project("test-report-geo-grid")
+    pid = project["id"]
+    with get_connection() as conn:
+        # 3 de 4 puntos con nosotros visibles -> 75% de visibilidad
+        for lat, lng, pos in [(3.44, -76.54, 2), (3.44, -76.52, 3), (3.46, -76.54, 1), (3.46, -76.52, None)]:
+            conn.execute(insert(geo_grid_rankings).values(
+                project_id=pid, keyword="reparacion celulares cali", date="2026-08-28",
+                grid_lat=lat, grid_lng=lng, our_position=pos, our_listing_title="JC Reparaciones" if pos else None,
+                checked_at=now_iso(),
+            ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-geo-grid"))
+
+    section_idx = html.find("Geo-grid rank tracking")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 500]
+    assert "reparacion celulares cali" in section
+    assert "75.0%" in section
+    assert "3/4 puntos" in section
+
+
+@pytest.mark.asyncio
+async def test_reporte_geo_grid_declara_sin_datos():
+    project = _make_project("test-report-geo-grid-vacio")
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-geo-grid-vacio"))
+
+    section_idx = html.find("Geo-grid rank tracking")
+    assert section_idx != -1
+    assert "Sin datos" in html[section_idx:section_idx + 300]

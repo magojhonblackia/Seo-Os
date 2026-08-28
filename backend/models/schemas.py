@@ -135,6 +135,9 @@ class CollectRequest(BaseModel):
     # sin default adivinado, ver docstring de competitor_keywords.py.
     location_code: int | None = None
     language_code: str = "es"
+    # § mejoras 2026-08-28: collector "geo_grid" — ver docstring de geo_grid.py.
+    radius_km: float = 3.0
+    grid_size: int = Field(default=3, ge=1, le=7)
 
 
 class CollectResult(BaseModel):

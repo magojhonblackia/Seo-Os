@@ -19,6 +19,7 @@ from backend.collectors.ai_visibility import run_ai_visibility_collector
 from backend.collectors.backlinks import run_backlinks_collector
 from backend.collectors.competitor import scan_competitor
 from backend.collectors.competitor_keywords import run_competitor_keywords_collector
+from backend.collectors.geo_grid import run_geo_grid_collector
 from backend.collectors import progress as crawl_progress
 from backend.collectors.crawler import run_crawler
 from backend.collectors.geo import run_geo_collector
@@ -49,7 +50,7 @@ router = APIRouter(prefix="/api/collect", tags=["collectors"])
 _ALLOWED_MODULES = {
     "crawler", "geo", "opportunities", "trends", "trends_related", "competitor", "backlinks", "local", "gsc",
     "pagespeed", "indexation", "rank_tracking", "local_rank", "sitemap", "ga4", "site_health", "security_headers",
-    "indexnow", "question_ideas", "ai_visibility", "competitor_keywords",
+    "indexnow", "question_ideas", "ai_visibility", "competitor_keywords", "geo_grid",
 }
 
 
@@ -251,6 +252,21 @@ def trigger_collector(
             project["slug"], location_code=payload.location_code, language_code=payload.language_code
         )
         return {"snapshot_id": None, "status": result["status"], "summary": result.get("results") or {"message": result.get("message")}}
+
+    if module == "geo_grid":
+        # Disparo manual, no en la secuencia automática — costo real de pago
+        # por punto de grilla × keyword (DataForSEO Maps SERP, ver geo_grid.py).
+        if not payload.keywords:
+            raise HTTPException(status_code=422, detail="El collector 'geo_grid' requiere 'keywords'")
+        try:
+            result = run_geo_grid_collector(
+                project["slug"], keywords=payload.keywords,
+                radius_km=payload.radius_km, grid_size=payload.grid_size,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        summary = result.get("summary") or ({"message": result["message"]} if result.get("message") else None)
+        return {"snapshot_id": None, "status": result["status"], "summary": summary}
 
     if module == "question_ideas":
         # Disparo manual, no en la secuencia automática — mismo criterio que

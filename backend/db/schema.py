@@ -371,6 +371,29 @@ local_pack_rankings = Table(
     UniqueConstraint("project_id", "keyword", "date", name="uq_local_pack_rankings"),
 )
 
+# Geo-grid rank tracking (§ mejoras 2026-08-28, pedido explícito del usuario
+# tras revisar el catálogo de DataForSEO): local_pack_rankings de arriba mide
+# UN punto (la ubicación por defecto de quien busca) — esto mide una GRILLA de
+# puntos geográficos alrededor del negocio, el mismo concepto que Local Falcon
+# (competidor comercial). Vía DataForSEO SERP API (Google Maps,
+# location_coordinate), ver backend/collectors/geo_grid.py.
+geo_grid_rankings = Table(
+    "geo_grid_rankings",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("project_id", Integer, ForeignKey("projects.id"), nullable=False),
+    Column("keyword", String, nullable=False),
+    Column("date", String, nullable=False),
+    Column("grid_lat", Float, nullable=False),
+    Column("grid_lng", Float, nullable=False),
+    # None honesto si nuestro negocio no aparece en los resultados de ESE
+    # punto de la grilla — mismo criterio P1 que local_pack_rankings.
+    Column("our_position", Integer),
+    Column("our_listing_title", Text),
+    Column("checked_at", String, nullable=False),
+    UniqueConstraint("project_id", "keyword", "date", "grid_lat", "grid_lng", name="uq_geo_grid_rankings"),
+)
+
 # AI Visibility (§ mejoras 2026-07-27): qué responden Gemini/Claude/DeepSeek
 # EN VIVO cuando se les hace una pregunta real sobre el negocio o su categoría
 # — no un promedio ni un tracking histórico de terceros, la respuesta real de

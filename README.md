@@ -1308,6 +1308,41 @@ los 4 competidores reales, sin inventar nada.
 
 Suite: 691 tests.
 
+### Geo-grid rank tracking, vía DataForSEO Maps SERP (2026-08-28)
+
+Segunda función pedida tras revisar el catálogo de DataForSEO: equivalente
+directo a Local Falcon (competidor comercial de pago). `local_pack_rankings`
+(Serper, ya existente) mide UN punto — la ubicación por defecto de quien
+busca. Esto mide una GRILLA de puntos geográficos alrededor del negocio,
+mostrando cómo varía la visibilidad local según desde dónde busca el cliente.
+
+`backend/collectors/geo_grid.py` (nuevo) + tabla `geo_grid_rankings`:
+`generate_grid_points()` genera una grilla NxN equiespaciada (aproximación
+plana con corrección por `cos(latitud)`, suficiente a escala de una ciudad),
+y por cada punto × keyword consulta DataForSEO Google Maps SERP (live,
+`location_coordinate`) buscando el dominio propio en los resultados — mismo
+criterio de `local_rank.py`: match SOLO por dominio, nunca por nombre
+parecido. Default deliberadamente chico (grilla 3×3 = 9 puntos, ~$0.018 por
+keyword) con tope duro de 7×7 para evitar un costo accidental grande.
+
+Bug real encontrado escribiendo el test antes de confiar en el código
+(mismo patrón de todo el proyecto): el campo `domain` de la respuesta de
+DataForSEO ya viene como dominio pelado (`"negocio.com"`), no una URL
+completa — pasarlo por la misma función `_domain_of()` que sí espera una
+URL (usada para el fallback `url`) lo dejaba vacío, y el match contra el
+dominio propio siempre fallaba en silencio. El test lo detectó antes de
+cualquier corrida real.
+
+Centro de la grilla: `project.config["geo_grid"] = {"center_lat", "center_lng"}`,
+sin default adivinado (mismo patrón que `location_code` de
+`competitor_keywords.py` — usar coordenadas equivocadas trae datos de otro
+lugar en silencio). Endpoint `/api/dashboard/{slug}/geo-grid` + sección en
+el reporte (% de visibilidad por keyword sobre la grilla, posición promedio
+donde visible). Verificado en vivo contra jc: declara honestamente "sin
+datos" porque el centro de la grilla no está configurado todavía.
+
+Suite: 705 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

@@ -41,6 +41,7 @@ from backend.api.routes_dashboard import (
     get_keyword_ideas,
     get_indexation,
     get_keywords,
+    get_geo_grid,
     get_local_pack,
     get_local_seo,
     get_pagespeed,
@@ -228,6 +229,7 @@ async def generate_html_report(project: dict) -> str:
     keywords_data = get_keywords(project)
     keyword_ideas = get_keyword_ideas(project)
     local_pack = get_local_pack(project)
+    geo_grid = get_geo_grid(project)
     serp_analysis = get_serp_analysis(project)
     pagespeed_data = get_pagespeed(project)
     indexation = get_indexation(project)
@@ -546,6 +548,25 @@ async def generate_html_report(project: dict) -> str:
                 + (f'#{r["our_position"]}' if r.get("our_position") is not None else '<span class="muted">no visible en el rango consultado</span>')
                 + "</td></tr>"
                 for r in lp_rows
+            )
+            + "</tbody></table>"
+        )
+
+    # ---------- Geo-grid rank tracking (§ mejoras 2026-08-28): a diferencia de
+    # Local Pack de arriba (UN punto), esto mide una GRILLA de puntos
+    # geográficos — mismo concepto que Local Falcon. ----------
+    gg_keywords = geo_grid.get("keywords") or []
+    if not gg_keywords:
+        geo_grid_block = f'<p class="muted">{_esc(geo_grid.get("empty_reason") or "Sin datos de geo-grid todavía.")}</p>'
+    else:
+        geo_grid_block = (
+            f'<p class="muted">Grilla del {_esc(geo_grid.get("date"))} — % de puntos donde apareces en el Local '
+            "Pack de Maps, no un solo punto de origen.</p>"
+            "<table><thead><tr><th>Keyword</th><th>Visibilidad en la grilla</th><th>Posición prom. (donde visible)</th></tr></thead><tbody>"
+            + "".join(
+                f'<tr><td>{_esc(k["keyword"])}</td><td>{k["visibility_pct"]}% ({sum(1 for p in k["points"] if p["our_position"] is not None)}/{k["grid_points"]} puntos)</td>'
+                f'<td>{k["avg_position_where_visible"] if k["avg_position_where_visible"] is not None else "—"}</td></tr>'
+                for k in gg_keywords
             )
             + "</tbody></table>"
         )
@@ -1191,6 +1212,9 @@ async def generate_html_report(project: dict) -> str:
 
   <h2>🗺️ Local Pack de Google Maps (posición, rating y reseñas reales)</h2>
   {local_pack_block}
+
+  <h2>📍 Geo-grid rank tracking (visibilidad local por punto geográfico)</h2>
+  {geo_grid_block}
 
   <h2>🔎 SERP real — contra quién competimos de verdad</h2>
   {serp_block}
