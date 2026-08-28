@@ -1265,6 +1265,49 @@ address` falso.
 
 Suite: 675 tests.
 
+### Gap real de keywords vs competidor, vía DataForSEO Labs (2026-08-28)
+
+Pedido explícito del usuario tras revisar el catálogo completo de precios
+de DataForSEO esa misma sesión: resuelve el hueco más grande identificado
+ahí — hasta ahora SEO-OS solo podía comparar contra las keywords que YA
+elegíamos rastrear (GSC propio + curadas a mano); nunca podía descubrir una
+keyword NUEVA que el competidor rankea y nosotros ni sabíamos que existía.
+
+`backend/collectors/competitor_keywords.py` (nuevo): consulta DataForSEO
+Labs "Ranked Keywords" ($0.012/task + $0.00012/keyword) por cada dominio en
+`project.competitors`. `backend/analyzers/competitor_keywords.py`: filtra
+las keywords del competidor que NO tenemos en GSC (comparación case/acento-
+insensible) y con volumen ≥10/mes, genera una issue real por competidor
+cuando hay gaps.
+
+Honestidad (P1) — los nombres de campo del parseo de la respuesta (`keyword_
+data.keyword`, `ranked_serp_element.serp_item.rank_group`, etc.) salen de la
+documentación oficial de DataForSEO, verificados contra esa página antes de
+escribir el código, pero NO contra una respuesta real todavía — no había
+credenciales propias disponibles para probar en vivo (el usuario pegó una
+contraseña de API en el chat dos veces esta sesión; se declaró comprometida
+las dos veces y se rechazó usarla, sin excepción, igual que con el PAT de
+GitHub de antes — regla dura sin importar cuántas veces se pida). Se deja
+documentado en el código que el parseo necesita verificarse contra la
+primera respuesta real antes de confiar en los resultados.
+
+`location_code` es obligatorio y SIN default adivinado — usar el país
+equivocado trae datos silenciosamente mal, así que el endpoint exige
+buscarlo primero contra la propia API de DataForSEO (`/v3/dataforseo_labs/
+locations_and_languages`), nunca un número copiado de una fuente no oficial.
+
+Reconciliación con cuidado (regresión evitada, cubierta con test): si el
+fetch de UN competidor falla en una corrida, su issue vieja (de una corrida
+anterior exitosa) NO debe cerrarse solo porque hoy no hubo dato fresco — un
+fetch fallido no es "el gap se resolvió".
+
+Nuevo endpoint `/api/dashboard/{slug}/competitor-keywords` + sección en el
+reporte. Verificado en vivo contra jc (sin credenciales configuradas
+todavía): el reporte declara honestamente "Nunca consultado todavía" para
+los 4 competidores reales, sin inventar nada.
+
+Suite: 691 tests.
+
 ### El reporte medía cosas que nunca mostraba (2026-07-25)
 
 Cuatro fuentes de datos reales estaban guardadas en la DB pero solo aparecían

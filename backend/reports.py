@@ -31,6 +31,7 @@ from backend.api.routes_dashboard import (
     get_ai_visibility,
     get_backlinks,
     get_toxic_backlinks,
+    get_competitor_keyword_gaps,
     get_competitors,
     get_competitor_detail,
     get_content,
@@ -236,6 +237,7 @@ async def generate_html_report(project: dict) -> str:
     content_data = get_content(project)
     question_ideas = get_question_ideas(project)
     competitors_data = get_competitors(project)
+    competitor_keyword_gaps = get_competitor_keyword_gaps(project)
     security_headers_data = get_security_headers(project)
     indexnow_data = get_indexnow_status(project)
     deltas = _score_history_deltas(project["id"])
@@ -817,6 +819,44 @@ async def generate_html_report(project: dict) -> str:
             )
         )
 
+    # ---------- Gap real de keywords vs competidor, DataForSEO Labs (§ mejoras
+    # 2026-08-28): a diferencia del gap de arriba (texto de título/H1), esto es
+    # ranking real confirmado — keyword+posición+volumen que el competidor SÍ
+    # tiene y nosotros no tenemos ninguna impresión registrada. ----------
+    ck_domains = competitor_keyword_gaps.get("domains") or []
+    if not ck_domains:
+        competitor_keyword_gaps_block = f'<p class="muted">{_esc(competitor_keyword_gaps.get("empty_reason") or "Sin competidores registrados.")}</p>'
+    else:
+        sections = []
+        for d in ck_domains:
+            if not d.get("available"):
+                sections.append(f'<p><strong>{_esc(d["domain"])}:</strong> <span class="muted">{_esc(d.get("reason") or "sin datos")}</span></p>')
+                continue
+            gaps = d.get("gaps") or []
+            if not gaps:
+                sections.append(
+                    f'<p><strong>{_esc(d["domain"])}:</strong> {d["keywords_found"]} keyword(s) rankeada(s) '
+                    f'consultadas, sin gaps reales por encima del volumen mínimo.</p>'
+                )
+                continue
+            sections.append(
+                f'<p style="margin-top:10px;"><strong>{_esc(d["domain"])}</strong> — {len(gaps)} gap(s) real(es) '
+                f'de {d["keywords_found"]} keyword(s) rankeada(s) consultadas:</p>'
+                "<table><thead><tr><th>Keyword</th><th>Su posición</th><th>Volumen/mes</th></tr></thead><tbody>"
+                + "".join(
+                    f'<tr><td>{_esc(g["keyword"])}</td><td>#{g.get("position", "—")}</td>'
+                    f'<td>{g.get("search_volume", "—")}</td></tr>'
+                    for g in gaps[:15]
+                )
+                + "</tbody></table>"
+            )
+        competitor_keyword_gaps_block = (
+            '<p class="muted">Datos reales de DataForSEO Labs (Ranked Keywords) — no una comparación de texto. '
+            '"Sin impresión registrada" no es lo mismo que "no rankeamos": puede ser que rankeemos y GSC aún no '
+            "lo haya reportado.</p>"
+            + "".join(sections)
+        )
+
     # ---------- Headers de seguridad HTTP (§ mejoras 2026-08-25: se analizaba en
     # cada auditoría pero solo generaba issue cuando algo faltaba — con todo bien
     # configurado, como en jc, el reporte no decía absolutamente nada al respecto) ----------
@@ -1157,6 +1197,9 @@ async def generate_html_report(project: dict) -> str:
 
   <h2>🎯 Competidores</h2>
   {competitors_block}
+
+  <h2>🔑 Gap real de keywords vs competidor (DataForSEO Labs)</h2>
+  {competitor_keyword_gaps_block}
 
   <h2>🔗 Backlinks</h2>
   {backlinks_block}

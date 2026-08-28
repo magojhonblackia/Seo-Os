@@ -955,6 +955,44 @@ def get_competitors(project: dict = Depends(get_project_or_404)) -> dict:
     return {"matrix": matrix, "gaps": gaps_by_domain}
 
 
+@router.get("/{slug}/competitor-keywords")
+def get_competitor_keyword_gaps(project: dict = Depends(get_project_or_404)) -> dict:
+    """Keywords reales que un competidor rankea (DataForSEO Labs) y nosotros
+    no tenemos ninguna impresión registrada — dato real, no comparación de
+    texto de título/H1 (eso lo cubre /competitors). Disparo manual, ver
+    backend/collectors/competitor_keywords.py."""
+    domains = []
+    with get_connection() as conn:
+        for domain in project.get("competitors") or []:
+            row = conn.execute(
+                select(snapshots.c.raw_data, snapshots.c.status, snapshots.c.error_message, snapshots.c.finished_at)
+                .where(
+                    snapshots.c.project_id == project["id"],
+                    snapshots.c.collector == f"competitor_keywords:{domain}",
+                )
+                .order_by(desc(snapshots.c.id))
+                .limit(1)
+            ).first()
+            if row is None:
+                domains.append({"domain": domain, "available": False, "reason": "Nunca consultado todavía."})
+                continue
+            if row[1] != "ok":
+                domains.append({"domain": domain, "available": False, "reason": row[2] or "Falló la última consulta."})
+                continue
+            raw = row[0] or {}
+            domains.append({
+                "domain": domain,
+                "available": True,
+                "checked_at": row[3],
+                "keywords_found": len(raw.get("keywords") or []),
+                "gaps": raw.get("gaps") or [],
+            })
+
+    if not domains:
+        return {"domains": [], "empty_reason": "Sin competidores registrados para este proyecto."}
+    return {"domains": domains}
+
+
 @router.get("/{slug}/competitors/{domain}/detail")
 def get_competitor_detail(domain: str, project: dict = Depends(get_project_or_404)) -> dict:
     """Comparación completa nosotros-vs-competidor: schema types, señales

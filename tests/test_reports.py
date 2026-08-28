@@ -786,3 +786,51 @@ async def test_reporte_backlinks_toxicos_declara_muestra_insuficiente():
     section_idx = html.find("Backlinks tóxicos por patrón")
     assert section_idx != -1
     assert "no alcanza" in html[section_idx:section_idx + 500]
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_gap_real_de_keywords_vs_competidor():
+    """§ mejoras 2026-08-28: get_competitor_keyword_gaps() (DataForSEO Labs)
+    tenía endpoint propio pero no llegaba al reporte estático — mismo patrón
+    de bug que Share of Voice y Backlinks tóxicos antes."""
+    project = _make_project("test-report-competitor-keyword-gaps")
+    pid = project["id"]
+    with get_connection() as conn:
+        conn.execute(projects.update().where(projects.c.id == pid).values(competitors=["competidor-real.com"]))
+        conn.execute(insert(snapshots).values(
+            project_id=pid, collector="competitor_keywords:competidor-real.com", status="ok",
+            started_at=now_iso(), finished_at=now_iso(),
+            raw_data={
+                "domain": "competidor-real.com",
+                "keywords": [{"keyword": "a", "position": 1}, {"keyword": "b", "position": 2}],
+                "gaps": [{"keyword": "cambio pantalla samsung cali", "position": 7, "search_volume": 90}],
+            },
+            created_at=now_iso(),
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-competitor-keyword-gaps"))
+
+    section_idx = html.find("Gap real de keywords vs competidor")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 800]
+    assert "competidor-real.com" in section
+    assert "cambio pantalla samsung cali" in section
+    assert "#7" in section
+    assert "90" in section
+
+
+@pytest.mark.asyncio
+async def test_reporte_gap_de_keywords_declara_no_consultado_sin_snapshot():
+    project = _make_project("test-report-competitor-keyword-gaps-vacio")
+    with get_connection() as conn:
+        conn.execute(projects.update().where(projects.c.id == project["id"]).values(competitors=["nunca-consultado.com"]))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-competitor-keyword-gaps-vacio"))
+
+    section_idx = html.find("Gap real de keywords vs competidor")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 500]
+    assert "nunca-consultado.com" in section
+    assert "Nunca consultado" in section

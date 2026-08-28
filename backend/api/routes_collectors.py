@@ -18,6 +18,7 @@ from backend.api.deps import get_project_or_404
 from backend.collectors.ai_visibility import run_ai_visibility_collector
 from backend.collectors.backlinks import run_backlinks_collector
 from backend.collectors.competitor import scan_competitor
+from backend.collectors.competitor_keywords import run_competitor_keywords_collector
 from backend.collectors import progress as crawl_progress
 from backend.collectors.crawler import run_crawler
 from backend.collectors.geo import run_geo_collector
@@ -48,7 +49,7 @@ router = APIRouter(prefix="/api/collect", tags=["collectors"])
 _ALLOWED_MODULES = {
     "crawler", "geo", "opportunities", "trends", "trends_related", "competitor", "backlinks", "local", "gsc",
     "pagespeed", "indexation", "rank_tracking", "local_rank", "sitemap", "ga4", "site_health", "security_headers",
-    "indexnow", "question_ideas", "ai_visibility",
+    "indexnow", "question_ideas", "ai_visibility", "competitor_keywords",
 }
 
 
@@ -236,6 +237,20 @@ def trigger_collector(
         result = run_ai_visibility_collector(project["slug"])
         summary = result.get("summary") or ({"message": result["message"]} if result.get("message") else None)
         return {"snapshot_id": result["snapshot_id"], "status": result["status"], "summary": summary}
+
+    if module == "competitor_keywords":
+        # Disparo manual, no en la secuencia automática — costo real de pago
+        # por keyword devuelta (DataForSEO Labs, ver competitor_keywords.py).
+        # location_code sin default adivinado: obligatorio en el payload.
+        if not payload.location_code:
+            raise HTTPException(
+                status_code=422,
+                detail="El collector 'competitor_keywords' requiere 'location_code' (ver docstring del módulo: nunca se adivina).",
+            )
+        result = run_competitor_keywords_collector(
+            project["slug"], location_code=payload.location_code, language_code=payload.language_code
+        )
+        return {"snapshot_id": None, "status": result["status"], "summary": result.get("results") or {"message": result.get("message")}}
 
     if module == "question_ideas":
         # Disparo manual, no en la secuencia automática — mismo criterio que

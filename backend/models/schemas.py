@@ -131,6 +131,10 @@ class CollectRequest(BaseModel):
     # § 2026-07-27: Search Console deja elegir período (7d/28d/3-16 meses) en
     # su propia UI — antes esto era fijo a 30 días. Solo lo usa el collector "gsc".
     lookback_days: int = Field(default=30, ge=1, le=480)
+    # § mejoras 2026-08-28: collector "competitor_keywords" (DataForSEO Labs) —
+    # sin default adivinado, ver docstring de competitor_keywords.py.
+    location_code: int | None = None
+    language_code: str = "es"
 
 
 class CollectResult(BaseModel):
