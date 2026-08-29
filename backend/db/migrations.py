@@ -87,6 +87,14 @@ _PAGES_COLUMNS_FASE1 = {
     "http_last_modified": "TEXT",
     "schema_date_published": "TEXT",
     "schema_date_modified": "TEXT",
+    # § mejoras 2026-08-28: páginas huérfanas — una URL que dejó de
+    # descubrirse en el crawl (cambió de estructura, se eliminó) quedaba con
+    # sus issues 'critical' abiertas para siempre, porque la reconciliación
+    # solo toca URLs presentes en el crawl más reciente. Ver
+    # is_noindex_justified/orphan handling en crawler.py.
+    "is_orphaned": "BOOLEAN DEFAULT 0",
+    "orphaned_checked_at": "TEXT",
+    "orphaned_reason": "TEXT",
 }
 
 

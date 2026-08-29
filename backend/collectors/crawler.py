@@ -51,6 +51,11 @@ MAX_PAGES_OWN_SITE = 500
 MAX_PAGES_COMPETITOR = 50
 MAX_REDIRECTS = 5
 MAX_BODY_BYTES = 2 * 1024 * 1024  # 2MB, ignorar binarios grandes
+# § mejoras 2026-08-28: límite duro de páginas huérfanas a verificar por
+# corrida — una migración grande de URLs no debe disparar cientos de
+# peticiones HTTP extra en un solo crawl (regla P5, mismo criterio ético que
+# MIN_DELAY_SECONDS). Las que sobren se revisan en la siguiente corrida.
+MAX_ORPHAN_CHECKS_PER_RUN = 30
 
 
 @dataclass
@@ -687,6 +692,35 @@ def crawl_site(
     return crawled_pages, errors
 
 
+def _check_page_still_alive(url: str) -> tuple[bool, str]:
+    """Verifica con una petición HTTP REAL si una URL que dejó de descubrirse
+    en el crawl más reciente sigue viva (§ mejoras 2026-08-28, páginas
+    huérfanas). Nunca se marca huérfana solo por ausencia en el crawl — eso
+    puede ser un límite de max_pages, no que la página haya desaparecido.
+
+    HEAD primero (más barato); si el servidor no lo soporta (405/501, algunos
+    lo rechazan), reintenta con GET. httpx sigue redirects automáticamente
+    (follow_redirects=True, igual que crawl_site) — si termina en una URL
+    DISTINTA a la pedida, se trata como "ya no es esta URL" (caso real
+    encontrado en jc: URLs viejas con guión que ahora redirigen 301 a la
+    ruta con slash), no como "sigue viva en su URL original"."""
+    try:
+        with httpx.Client(timeout=REQUEST_TIMEOUT, follow_redirects=True, max_redirects=MAX_REDIRECTS) as client:
+            headers = {"User-Agent": USER_AGENT}
+            response = client.head(url, headers=headers)
+            if response.status_code in (405, 501):
+                response = client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        return False, f"petición de verificación falló: {exc}"
+
+    if response.status_code != 200:
+        return False, f"HTTP {response.status_code}"
+    final_url = str(response.url)
+    if final_url != url:
+        return False, f"redirige permanentemente a {final_url} — ya no es esta URL"
+    return True, "sigue en 200 en la misma URL"
+
+
 class TechnicalCrawler(BaseCollector):
     name = "crawler"
 
@@ -729,6 +763,7 @@ class TechnicalCrawler(BaseCollector):
             "issues_created": 0,
             "issues_resolved": 0,  # issues viejas cerradas porque ya no se reproducen (reconciliación)
             "by_severity": {"critical": 0, "high": 0, "medium": 0},
+            "pages_orphaned": 0,  # § mejoras 2026-08-28: confirmadas muertas con petición HTTP real
         }
         expected_lang = self.project.get("language", "es")
         # § mejoras 2026-08-28: ver docstring de is_noindex_justified()
@@ -845,6 +880,13 @@ class TechnicalCrawler(BaseCollector):
                     "http_last_modified": raw.get("http_last_modified"),
                     "schema_date_published": raw.get("schema_date_published"),
                     "schema_date_modified": raw.get("schema_date_modified"),
+                    # § mejoras 2026-08-28: si esta URL había quedado marcada
+                    # huérfana en una corrida anterior y hoy SÍ se descubrió
+                    # de nuevo, se desmarca — la ausencia de max_pages ya no
+                    # aplica y la verificación HTTP quedaría obsoleta.
+                    "is_orphaned": False,
+                    "orphaned_checked_at": None,
+                    "orphaned_reason": None,
                 }
                 if existing:
                     page_id = existing[0]
@@ -880,7 +922,58 @@ class TechnicalCrawler(BaseCollector):
 
                 summary["pages_analyzed"] += 1
 
+        orphan_result = self._reconcile_orphaned_pages({raw["url"] for raw in raw_pages})
+        summary["pages_orphaned"] += orphan_result["orphaned_count"]
+        summary["issues_resolved"] += orphan_result["issues_resolved"]
+
         return summary
+
+    def _reconcile_orphaned_pages(self, current_urls: set[str]) -> dict:
+        """Páginas de `pages` que YA NO aparecen en el crawl más reciente
+        (`current_urls`) — se verifican con una petición HTTP real antes de
+        tocarlas (nunca solo por ausencia, que puede ser un límite de
+        max_pages, no que la página desapareció — ver docstring de
+        _check_page_still_alive). Confirmadas muertas: se marcan
+        `is_orphaned=True` (nunca se borran, para no perder historial) y se
+        cierran sus issues abiertas vía el mismo reconcile_page_issues que ya
+        usa el análisis normal — 'resolved' es semánticamente correcto: el
+        detector ya no ve el problema porque la página misma no existe.
+
+        Bug real que esto corrige (hallado auditando jc, 2026-08-28): 10
+        páginas con URLs de una estructura vieja (antes de que el sitio
+        migrara a otra ruta) quedaron con issues 'critical' abiertas para
+        siempre, porque la reconciliación normal solo toca páginas presentes
+        en el crawl actual — una página que el crawler ya no descubre en
+        absoluto nunca se reconciliaba por ninguna vía."""
+        with get_connection() as conn:
+            rows = conn.execute(
+                select(pages.c.id, pages.c.url).where(
+                    pages.c.project_id == self.project["id"],
+                    pages.c.is_orphaned.is_(False),
+                )
+            ).all()
+        candidates = [r for r in rows if r.url not in current_urls][:MAX_ORPHAN_CHECKS_PER_RUN]
+
+        orphaned_count = 0
+        issues_resolved = 0
+        with get_connection() as conn:
+            for candidate in candidates:
+                still_alive, reason = _check_page_still_alive(candidate.url)
+                if still_alive:
+                    continue
+                now = now_iso()
+                conn.execute(
+                    update(pages).where(pages.c.id == candidate.id).values(
+                        is_orphaned=True, orphaned_checked_at=now, orphaned_reason=reason,
+                    )
+                )
+                orphaned_count += 1
+                issues_resolved += reconcile_page_issues(
+                    conn, project_id=self.project["id"], page_id=candidate.id, fresh_keys=set(), now=now,
+                )
+                time.sleep(MIN_DELAY_SECONDS)
+
+        return {"orphaned_count": orphaned_count, "issues_resolved": issues_resolved}
 
 
 def run_crawler(project_slug: str, max_pages: int | None = None) -> dict:

@@ -187,8 +187,12 @@ def run_opportunities_analysis(project_id: int) -> dict:
         query_rows = conn.execute(
             select(gsc_queries).where(gsc_queries.c.project_id == project_id, gsc_queries.c.date == latest_date)
         ).all()
+        # is_orphaned=False: excluye páginas confirmadas muertas (§ mejoras
+        # 2026-08-28) — no deben contar hacia el score técnico/de contenido
+        # ni aparecer como candidatas a "podar por cero impresiones" (ya no
+        # existen, "podar" no aplica).
         page_rows = conn.execute(
-            select(pages).where(pages.c.project_id == project_id)
+            select(pages).where(pages.c.project_id == project_id, pages.c.is_orphaned.is_(False))
         ).all()
         daily_rows = conn.execute(
             select(gsc_daily.c.date, gsc_daily.c.clicks).where(gsc_daily.c.project_id == project_id)

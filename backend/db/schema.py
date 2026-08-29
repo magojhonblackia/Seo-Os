@@ -163,6 +163,15 @@ pages = Table(
     Column("http_last_modified", Text),
     Column("schema_date_published", Text),
     Column("schema_date_modified", Text),
+    # § mejoras 2026-08-28: páginas huérfanas — ver comentario en migrations.py.
+    # is_orphaned=True solo se marca tras verificar con una petición HTTP
+    # directa (nunca solo por ausencia en un crawl, que puede ser por límite
+    # de max_pages) que la URL ya no resuelve en 200. Al reaparecer en un
+    # crawl futuro, el upsert normal de persist_analysis la vuelve a poner
+    # en False (ver page_values en crawler.py).
+    Column("is_orphaned", Boolean, default=False),
+    Column("orphaned_checked_at", Text),
+    Column("orphaned_reason", Text),
     UniqueConstraint("project_id", "url", name="uq_pages_project_url"),
 )
 

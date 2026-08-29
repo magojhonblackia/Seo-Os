@@ -263,7 +263,10 @@ def get_scorecards(project: dict = Depends(get_project_or_404)) -> dict:
             .limit(1)
         ).first()
 
-        page_rows = conn.execute(select(pages).where(pages.c.project_id == pid)).all()
+        # is_orphaned=False: excluye páginas confirmadas muertas (§ mejoras 2026-08-28).
+        page_rows = conn.execute(
+            select(pages).where(pages.c.project_id == pid, pages.c.is_orphaned.is_(False))
+        ).all()
         geo_latest = _latest_score(conn, pid, "geo")
         local_latest = _latest_score(conn, pid, "local")
         seo_score_delta = _score_delta(conn, pid, "seo")
@@ -354,8 +357,13 @@ def get_technical(project: dict = Depends(get_project_or_404)) -> dict:
     pid = project["id"]
     noindex_justified_patterns = (project.get("config") or {}).get("noindex_justified_patterns") or []
     with get_connection() as conn:
+        # is_orphaned=False: excluye páginas confirmadas muertas (§ mejoras
+        # 2026-08-28) — no tiene sentido mostrar el semáforo de una página
+        # que ya no existe.
         page_rows = conn.execute(
-            select(pages).where(pages.c.project_id == pid).order_by(pages.c.url)
+            select(pages)
+            .where(pages.c.project_id == pid, pages.c.is_orphaned.is_(False))
+            .order_by(pages.c.url)
         ).all()
 
     result_pages = []
@@ -888,8 +896,11 @@ def get_share_of_voice(project: dict = Depends(get_project_or_404)) -> dict:
 def get_content(project: dict = Depends(get_project_or_404)) -> dict:
     pid = project["id"]
     with get_connection() as conn:
+        # is_orphaned=False: excluye páginas confirmadas muertas (§ mejoras 2026-08-28).
         page_rows = conn.execute(
-            select(pages).where(pages.c.project_id == pid).order_by(pages.c.url)
+            select(pages)
+            .where(pages.c.project_id == pid, pages.c.is_orphaned.is_(False))
+            .order_by(pages.c.url)
         ).all()
 
     result = [

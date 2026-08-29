@@ -1,13 +1,18 @@
 """Tests de collectors: parseo con HTML grabado, SIN llamadas a internet (regla QA)."""
 from pathlib import Path
+from unittest.mock import patch
 
 from bs4 import BeautifulSoup
 from sqlalchemy import insert, select
 
-from backend.analyzers.issue_store import reconcile_page_issues, reconcile_project_issues
+from backend.analyzers.issue_store import record_issue, reconcile_page_issues, reconcile_project_issues
+from backend.analyzers.mago import MagoIssue
 from backend.collectors.base import BaseCollector, CollectorResult
 from backend.collectors.crawler import (
+    MAX_ORPHAN_CHECKS_PER_RUN,
+    TechnicalCrawler,
     _analyze_answer_extractability,
+    _check_page_still_alive,
     _extract_page_data,
     _looks_like_question_heading,
     _normalize_url,
@@ -690,3 +695,207 @@ def test_persist_analysis_pagina_200_normal_si_sigue_generando_issues():
         ).first()
     assert row.status_code == 200
     assert row.title == "X"  # sí se guarda el contenido real
+
+
+# ---------- Páginas huérfanas (§ mejoras 2026-08-28) — bug real hallado
+# auditando jc: una URL que deja de descubrirse en el crawl (cambió de
+# estructura, se eliminó) nunca se reconciliaba, así que sus issues
+# 'critical' quedaban abiertas para siempre. Ver docstring de
+# _check_page_still_alive / TechnicalCrawler._reconcile_orphaned_pages. ----------
+
+class _FakeAliveResponse:
+    def __init__(self, status_code: int, url: str):
+        self.status_code = status_code
+        self.url = url
+
+
+class _FakeAliveClient:
+    """Mockea httpx.Client para _check_page_still_alive — sin red real."""
+
+    def __init__(self, head_status=200, get_status=None, final_url=None, requests_made=None):
+        self.head_status = head_status
+        self.get_status = get_status
+        self.final_url = final_url
+        self.requests_made = requests_made if requests_made is not None else []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def head(self, url, headers=None):
+        self.requests_made.append(("HEAD", url))
+        return _FakeAliveResponse(self.head_status, self.final_url or url)
+
+    def get(self, url, headers=None):
+        self.requests_made.append(("GET", url))
+        status = self.get_status if self.get_status is not None else self.head_status
+        return _FakeAliveResponse(status, self.final_url or url)
+
+
+def test_check_page_still_alive_200_misma_url():
+    with patch("backend.collectors.crawler.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = _FakeAliveClient(head_status=200)
+        mock_httpx.HTTPError = Exception
+        alive, reason = _check_page_still_alive("https://x.com/pagina")
+    assert alive is True
+
+
+def test_check_page_still_alive_404():
+    with patch("backend.collectors.crawler.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = _FakeAliveClient(head_status=404)
+        mock_httpx.HTTPError = Exception
+        alive, reason = _check_page_still_alive("https://x.com/ya-no-existe")
+    assert alive is False
+    assert "404" in reason
+
+
+def test_check_page_still_alive_redirige_a_otra_url_no_cuenta_como_viva():
+    """Caso real de jc: una URL vieja con guión ahora redirige 301 a la ruta
+    con slash — sigue devolviendo 200, pero NO en su URL original."""
+    with patch("backend.collectors.crawler.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = _FakeAliveClient(
+            head_status=200, final_url="https://x.com/nueva-ruta/pagina"
+        )
+        mock_httpx.HTTPError = Exception
+        alive, reason = _check_page_still_alive("https://x.com/vieja-pagina")
+    assert alive is False
+    assert "redirige" in reason
+
+
+def test_check_page_still_alive_head_no_soportado_reintenta_con_get():
+    requests_made = []
+    with patch("backend.collectors.crawler.httpx") as mock_httpx:
+        mock_httpx.Client.return_value = _FakeAliveClient(
+            head_status=405, get_status=200, requests_made=requests_made
+        )
+        mock_httpx.HTTPError = Exception
+        alive, _ = _check_page_still_alive("https://x.com/sin-head")
+    assert alive is True
+    assert requests_made == [("HEAD", "https://x.com/sin-head"), ("GET", "https://x.com/sin-head")]
+
+
+def _mk_project_for_orphan(slug: str) -> int:
+    with get_connection() as conn:
+        return conn.execute(
+            insert(projects).values(
+                slug=slug, name="Orphan Test", url="https://orphan-test.com",
+                gsc_property="sc-domain:orphan-test.com", country="CO", language="es",
+                competitors=[], is_active=True, config={}, created_at=now_iso(),
+            )
+        ).inserted_primary_key[0]
+
+
+def _mk_stale_page_with_open_issue(pid: int, url: str) -> int:
+    """Simula una página de un crawl anterior con un issue 'critical' abierto
+    — el estado exacto que dejaba el bug real antes de este fix."""
+    stale_snapshot_id = _mk_snapshot(pid)
+    with get_connection() as conn:
+        page_id = conn.execute(
+            insert(pages).values(project_id=pid, url=url, first_seen=now_iso(), is_indexable=False)
+        ).inserted_primary_key[0]
+        record_issue(
+            conn, project_id=pid, snapshot_id=stale_snapshot_id, page_id=page_id,
+            issue=MagoIssue(
+                severity="critical", category="index", title=f"{url}: No indexable sin justificación",
+                page_url=url, effort="1h", impact=5,
+            ),
+            now=now_iso(),
+        )
+    return page_id
+
+
+def test_persist_analysis_marca_huerfana_confirmada_muerta_y_cierra_su_issue():
+    pid = _mk_project_for_orphan("test-orphan-muerta")
+    stale_url = "https://orphan-test.com/pagina-vieja"
+    page_id = _mk_stale_page_with_open_issue(pid, stale_url)
+
+    crawler = TechnicalCrawler("test-orphan-muerta")
+    snapshot_id = _mk_snapshot(pid)
+    with patch("backend.collectors.crawler.httpx") as mock_httpx, patch("backend.collectors.crawler.time.sleep"):
+        mock_httpx.Client.return_value = _FakeAliveClient(head_status=404)
+        mock_httpx.HTTPError = Exception
+        summary = crawler.persist_analysis(snapshot_id, raw_pages=[])  # stale_url NO está en este crawl
+
+    assert summary["pages_orphaned"] == 1
+    assert summary["issues_resolved"] == 1
+
+    with get_connection() as conn:
+        page_row = conn.execute(select(pages).where(pages.c.id == page_id)).first()
+        issue_row = conn.execute(select(issues).where(issues.c.page_id == page_id)).first()
+    assert page_row.is_orphaned is True
+    assert page_row.orphaned_reason is not None
+    assert issue_row.status == "resolved"
+
+
+def test_persist_analysis_no_marca_huerfana_si_sigue_viva():
+    """No solo por ausencia en el crawl (podría ser un límite de max_pages) —
+    si la verificación HTTP real confirma 200, se deja intacta."""
+    pid = _mk_project_for_orphan("test-orphan-viva")
+    stale_url = "https://orphan-test.com/pagina-que-sigue-viva"
+    page_id = _mk_stale_page_with_open_issue(pid, stale_url)
+
+    crawler = TechnicalCrawler("test-orphan-viva")
+    snapshot_id = _mk_snapshot(pid)
+    with patch("backend.collectors.crawler.httpx") as mock_httpx, patch("backend.collectors.crawler.time.sleep"):
+        mock_httpx.Client.return_value = _FakeAliveClient(head_status=200)
+        mock_httpx.HTTPError = Exception
+        summary = crawler.persist_analysis(snapshot_id, raw_pages=[])
+
+    assert summary["pages_orphaned"] == 0
+    assert summary["issues_resolved"] == 0
+
+    with get_connection() as conn:
+        page_row = conn.execute(select(pages).where(pages.c.id == page_id)).first()
+        issue_row = conn.execute(select(issues).where(issues.c.page_id == page_id)).first()
+    assert page_row.is_orphaned is False
+    assert issue_row.status == "open"
+
+
+def test_persist_analysis_reaparecer_en_un_crawl_desmarca_huerfana():
+    """Una página marcada huérfana que vuelve a descubrirse en un crawl
+    posterior se desmarca — el upsert normal la trae de vuelta."""
+    pid = _mk_project_for_orphan("test-orphan-reaparece")
+    url = "https://orphan-test.com/pagina-que-vuelve"
+    with get_connection() as conn:
+        page_id = conn.execute(
+            insert(pages).values(
+                project_id=pid, url=url, first_seen=now_iso(),
+                is_orphaned=True, orphaned_checked_at=now_iso(), orphaned_reason="HTTP 404",
+            )
+        ).inserted_primary_key[0]
+
+    crawler = TechnicalCrawler("test-orphan-reaparece")
+    snapshot_id = _mk_snapshot(pid)
+    raw_pages = [
+        {
+            "url": url, "status_code": 200, "title": "Volvió", "meta_description": None,
+            "h1_tags": [], "word_count": 100, "is_indexable": True,
+            "has_author": False, "has_date": False, "has_contact": False,
+            "body_text_sample": "contenido",
+        }
+    ]
+    crawler.persist_analysis(snapshot_id, raw_pages)
+
+    with get_connection() as conn:
+        page_row = conn.execute(select(pages).where(pages.c.id == page_id)).first()
+    assert page_row.is_orphaned is False
+    assert page_row.orphaned_reason is None
+
+
+def test_reconcile_orphaned_pages_respeta_el_limite_por_corrida():
+    pid = _mk_project_for_orphan("test-orphan-limite")
+    for i in range(MAX_ORPHAN_CHECKS_PER_RUN + 5):
+        _mk_stale_page_with_open_issue(pid, f"https://orphan-test.com/vieja-{i}")
+
+    crawler = TechnicalCrawler("test-orphan-limite")
+    snapshot_id = _mk_snapshot(pid)
+    with patch("backend.collectors.crawler.httpx") as mock_httpx, patch("backend.collectors.crawler.time.sleep"):
+        mock_httpx.Client.return_value = _FakeAliveClient(head_status=404)
+        mock_httpx.HTTPError = Exception
+        summary = crawler.persist_analysis(snapshot_id, raw_pages=[])
+
+    # No dispara más de MAX_ORPHAN_CHECKS_PER_RUN peticiones HTTP extra en
+    # una sola corrida (regla P5) — las que sobren quedan para la siguiente.
+    assert summary["pages_orphaned"] == MAX_ORPHAN_CHECKS_PER_RUN

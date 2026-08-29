@@ -25,6 +25,56 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Páginas huérfanas: reconciliar issues de URLs que ya no existen (2026-08-28)
+
+Hallazgo colateral del fix de `noindex_justified` de arriba, implementado
+como tarea aparte a pedido del usuario: 10 issues "critical" de jc eran de
+URLs con la estructura VIEJA de los templates ciudad×servicio (antes de que
+el sitio migrara de `/reparacion-iphone-{ciudad}` a `/reparacion-iphone/
+{ciudad}`) — el crawler ya no las descubre, y la reconciliación normal
+(`reconcile_page_issues`) solo toca URLs presentes en el crawl MÁS
+RECIENTE, así que esas issues quedaban abiertas para siempre sin ninguna
+vía de cerrarse, sin importar cuántas veces se re-crawleara el sitio.
+
+- Nuevo `_check_page_still_alive(url)` en `crawler.py`: HEAD real (GET si el
+  servidor no soporta HEAD, 405/501) antes de tocar nada — **nunca se marca
+  huérfana una página solo por ausencia en el crawl** (podría ser un límite
+  de `max_pages`, no que la página desapareció). Si termina en una URL
+  DISTINTA a la pedida (redirect permanente, el caso real de jc) también
+  cuenta como "ya no es esta URL".
+- `TechnicalCrawler._reconcile_orphaned_pages()`: al final de cada
+  `persist_analysis`, revisa hasta `MAX_ORPHAN_CHECKS_PER_RUN=30` páginas de
+  `pages` ausentes del crawl actual (límite duro, regla P5 — no dispara
+  cientos de peticiones extra en una corrida; las que sobren se revisan en
+  la siguiente). Confirmadas muertas: `is_orphaned=True` (nunca se borra la
+  fila, para no perder historial) + se cierran sus issues abiertas
+  reutilizando `reconcile_page_issues` con `fresh_keys` vacío — 'resolved'
+  ya significa exactamente "el detector dejó de verlo", semántica correcta
+  también para "la página misma ya no existe".
+- Si una página marcada huérfana vuelve a aparecer en un crawl futuro, el
+  upsert normal de `persist_analysis` la desmarca sola (`is_orphaned=False`
+  en cada escritura fresca) — no hace falta ningún paso manual.
+- `is_orphaned=False` agregado como filtro a los 5 lugares que leen `pages`
+  para scores/listados visibles al usuario: `get_technical` (pestaña
+  Técnico), `get_content` (pestaña Contenido), `get_scorecards`,
+  `run_opportunities_analysis` y `build_project_context` (Asistente IA) —
+  una página confirmada muerta no debe seguir contando en el score técnico
+  ni aparecer en tablas de páginas activas. Dejado SIN tocar a propósito:
+  `site_health.py` (cobertura sitemap↔crawleado — ahí "en pages pero no
+  descubierta" es información real, no ruido a esconder), lookups por
+  `page_id` puntual, y los collectors de indexación/competidores (fuera del
+  alcance de este pedido).
+- Migración `pages.is_orphaned/orphaned_checked_at/orphaned_reason`
+  (idempotente, ver `migrations.py`).
+- Tests: 9 nuevos (`_check_page_still_alive` en sus 4 casos reales — 200,
+  404, redirect a otra URL, HEAD no soportado — más la integración completa
+  vía `persist_analysis`: marca huérfana y cierra el issue, NO marca si
+  sigue viva, se desmarca sola al reaparecer, y respeta el límite por
+  corrida). `time.sleep` mockeado en los tests (si no, el test del límite
+  tardaba 30s reales). Suite: 761 → 769.
+- Aplicado en vivo contra jc real (tras migrar `data/seo.db`): re-crawl
+  completo — ver resultado abajo.
+
 ### Bug real corregido: `noindex_justified` nunca se poblaba (190 issues "critical" que eran noindex a propósito) (2026-08-28)
 
 Otra sesión de Claude auditando el reporte de jc reportó "190 issues críticas

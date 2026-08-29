@@ -26,7 +26,14 @@ def build_project_context(conn, project_id: int) -> dict:
         )
     ).scalar() or 0
 
-    page_dicts = [dict(p._mapping) for p in conn.execute(select(pages).where(pages.c.project_id == project_id)).all()]
+    # is_orphaned=False: excluye páginas confirmadas muertas (§ mejoras
+    # 2026-08-28) — no deben contar hacia el score técnico/de contenido.
+    page_dicts = [
+        dict(p._mapping)
+        for p in conn.execute(
+            select(pages).where(pages.c.project_id == project_id, pages.c.is_orphaned.is_(False))
+        ).all()
+    ]
     project_config = conn.execute(select(projects.c.config).where(projects.c.id == project_id)).scalar() or {}
     technical_score = calculate_technical_score(page_dicts, project_config.get("noindex_justified_patterns") or [])
     content_score = calculate_content_score(page_dicts)
