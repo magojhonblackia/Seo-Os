@@ -331,7 +331,34 @@
         <button id="competitor-kw-btn" type="button">🔑 Consultar keywords rankeadas (todos los competidores)</button>
       </div>
       <span id="competitor-kw-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
-      <div id="competitor-kw-results" style="margin-bottom:16px;"></div>
+      <div id="competitor-kw-results" style="margin-bottom:24px;"></div>
+
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">📊 Volumen de búsqueda real (Google Ads)</h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        Búsquedas/mes REALES de Google Ads (no el interés relativo 0-100 de Trends) — con histórico de 12 meses,
+        competencia y CPC. Costo plano por consulta, sin importar cuántas keywords (hasta 20 aquí).
+      </p>
+      <div class="filters-row">
+        <input id="search-volume-keywords" type="text" placeholder="Keywords separadas por coma (obligatorio)" style="flex:1;" />
+        <input id="search-volume-location" type="text" placeholder="location_code (ej: 2170 = Colombia)" style="width:220px;" />
+        <button id="search-volume-btn" type="button">📊 Consultar volumen real</button>
+      </div>
+      <span id="search-volume-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="search-volume-table" class="table-wrapper" style="margin-bottom:24px;"></div>
+
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">📍 Citas locales / listados de negocio (Business Listings)</h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        Busca tu nombre de negocio en la base de listados de DataForSEO (Google Business Profile y otros
+        directorios) — separa el listado propio, las citas reales (mismo teléfono, dominio distinto) de posibles
+        listados duplicados (nombre casi idéntico, sin teléfono/dominio que lo confirme — requiere revisión
+        manual, nunca se asume con certeza).
+      </p>
+      <div class="filters-row">
+        <input id="business-listings-title" type="text" placeholder="Nombre del negocio (vacío = nombre del proyecto)" style="flex:1;" />
+        <button id="business-listings-btn" type="button">📍 Buscar listados</button>
+      </div>
+      <span id="business-listings-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="business-listings-results" style="margin-bottom:16px;"></div>
     </div>
   </main>
 

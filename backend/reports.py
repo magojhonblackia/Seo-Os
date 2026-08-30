@@ -44,6 +44,8 @@ from backend.api.routes_dashboard import (
     get_keywords,
     get_geo_grid,
     get_ai_overview_check,
+    get_search_volume,
+    get_business_listings,
     get_js_rendering_check,
     get_local_pack,
     get_local_seo,
@@ -235,6 +237,8 @@ async def generate_html_report(project: dict) -> str:
     geo_grid = get_geo_grid(project)
     js_rendering_check = get_js_rendering_check(project)
     ai_overview_check = get_ai_overview_check(project)
+    search_volume_data = get_search_volume(project)
+    business_listings_data = get_business_listings(project)
     serp_analysis = get_serp_analysis(project)
     pagespeed_data = get_pagespeed(project)
     indexation = get_indexation(project)
@@ -942,6 +946,65 @@ async def generate_html_report(project: dict) -> str:
             + "</tbody></table>"
         )
 
+    # ---------- Volumen de búsqueda real de Google Ads (§ mejoras 2026-08-29,
+    # DataForSEO Keywords Data API) — a diferencia de Trends de arriba (interés
+    # relativo 0-100), esto es búsquedas/mes reales. ----------
+    if not search_volume_data.get("available"):
+        search_volume_block = f'<p class="muted">{_esc(search_volume_data.get("empty_reason") or "Sin consulta todavía.")}</p>'
+    else:
+        sv_results = search_volume_data.get("results") or []
+
+        def _sv_row(r: dict) -> str:
+            volume = r.get("search_volume") if r.get("search_volume") is not None else "—"
+            cpc = f'${r["cpc"]:.2f}' if r.get("cpc") is not None else "—"
+            return (
+                f'<tr><td>{_esc(r["keyword"])}</td><td>{volume}</td>'
+                f'<td>{_esc(r.get("competition") or "—")}</td><td>{cpc}</td></tr>'
+            )
+
+        search_volume_block = (
+            f'<p class="muted">Última consulta: {_esc(search_volume_data.get("checked_at"))} — dato real de Google '
+            "Ads (no el interés relativo de Trends).</p>"
+            + "<table><thead><tr><th>Keyword</th><th>Búsquedas/mes</th><th>Competencia</th><th>CPC</th></tr></thead><tbody>"
+            + "".join(_sv_row(r) for r in sv_results)
+            + "</tbody></table>"
+        )
+
+    # ---------- Citas locales / listados de negocio (§ mejoras 2026-08-29,
+    # DataForSEO Business Listings API) ----------
+    if not business_listings_data.get("available"):
+        business_listings_block = f'<p class="muted">{_esc(business_listings_data.get("empty_reason") or "Sin búsqueda todavía.")}</p>'
+    else:
+        bl_class = business_listings_data.get("classification") or {}
+        bl_own = bl_class.get("own_listing")
+        bl_citations = bl_class.get("citations") or []
+        bl_dupes = bl_class.get("possible_duplicates") or []
+        business_listings_block = (
+            f'<p class="muted">Última búsqueda: {_esc(business_listings_data.get("checked_at"))} — '
+            f'"{_esc(business_listings_data.get("business_title"))}", {business_listings_data.get("total_items_found")} '
+            "listado(s) encontrados en total.</p>"
+            + (
+                f'<p><strong>Listado propio:</strong> {_esc(bl_own["title"])} — {_esc(bl_own.get("address") or "sin dirección")}</p>'
+                if bl_own
+                else '<p class="muted">No se encontró un listado con el dominio propio en los resultados.</p>'
+            )
+            + f'<p><strong>{len(bl_citations)}</strong> cita(s) real(es) en otros directorios (mismo teléfono, dominio distinto).</p>'
+            + (
+                f'<p style="color:#dc2626;"><strong>⚠️ {len(bl_dupes)} posible(s) listado(s) duplicado(s)</strong> — nombre '
+                "casi idéntico, sin teléfono/dominio que lo confirme como cita real. Requiere revisión manual, SEO-OS no "
+                "puede confirmar si es duplicado real o un negocio distinto con nombre parecido.</p>"
+                "<table><thead><tr><th>Nombre</th><th>Dirección</th><th>Reclamado</th></tr></thead><tbody>"
+                + "".join(
+                    f'<tr><td>{_esc(d["title"])}</td><td>{_esc(d.get("address") or "—")}</td>'
+                    f'<td>{"sí" if d.get("is_claimed") else "no"}</td></tr>'
+                    for d in bl_dupes
+                )
+                + "</tbody></table>"
+                if bl_dupes
+                else '<p class="muted">Ningún listado duplicado encontrado.</p>'
+            )
+        )
+
     # ---------- Headers de seguridad HTTP (§ mejoras 2026-08-25: se analizaba en
     # cada auditoría pero solo generaba issue cuando algo faltaba — con todo bien
     # configurado, como en jc, el reporte no decía absolutamente nada al respecto) ----------
@@ -1119,13 +1182,42 @@ async def generate_html_report(project: dict) -> str:
             "pueden CRAWLEAR el sitio (sección GEO), que es una cosa distinta.</li>"
         )
     )
+    # § 2026-08-29: mismo criterio condicional que ChatGPT/Perplexity arriba —
+    # volumen real y citations locales dejaron de ser "no medible" cuando
+    # DataForSEO está configurado (Keywords Data API / Business Listings API).
+    _search_volume_item = (
+        '<li><strong>Volumen de búsqueda absoluto:</strong> medido — ver sección "Volumen de búsqueda real '
+        '(Google Ads)" en 🛰️ DataForSEO, con búsquedas/mes reales, histórico de 12 meses, competencia y CPC '
+        "(no una estimación de interés relativo).</li>"
+        if _settings.has_dataforseo
+        else (
+            '<li><strong>Volumen de búsqueda absoluto:</strong> lo que mostramos (Trends) es interés relativo '
+            "0-100, no búsquedas/mes reales (requiere credenciales de DataForSEO en Configuración — con eso "
+            "configurado, la sección \"Volumen de búsqueda real\" en 🛰️ DataForSEO da el dato real de Google "
+            "Ads). Para las keywords donde ya apareces, las impresiones REALES de Search Console son mejor "
+            "dato que cualquier estimación.</li>"
+        )
+    )
+    _local_citations_item = (
+        '<li><strong>Citations en directorios locales</strong> (Yelp, Facebook, otros directorios): medido — '
+        'ver sección "Citas locales / listados de negocio" en 🛰️ DataForSEO (Business Listings API) — busca tu '
+        "nombre de negocio y separa citas reales de posibles listados duplicados. El rating y número de reseñas "
+        "de Google Maps también se miden por separado (sección Local Pack).</li>"
+        if _settings.has_dataforseo
+        else (
+            '<li><strong>Citations en directorios locales</strong> (Yelp, Facebook, directorios del sector): '
+            "requieren credenciales de DataForSEO en Configuración (Business Listings API) — con eso "
+            'configurado, la sección "Citas locales" en 🛰️ DataForSEO las mide. El rating y el número de '
+            "reseñas de Google Maps SÍ se miden ya (sección Local Pack).</li>"
+        )
+    )
     not_available_block = f"""
     <ul class="not-available">
-      <li><strong>Volumen de búsqueda absoluto:</strong> lo que mostramos (Trends) es interés relativo 0-100, no búsquedas/mes reales. Requiere Google Ads API con cuenta activa o un proveedor de pago — no hay fuente gratuita. Para las keywords donde ya apareces, las impresiones REALES de Search Console son mejor dato que cualquier estimación.</li>
+      {_search_volume_item}
       {_chatgpt_perplexity_item}
       <li><strong>Backlinks de la competencia:</strong> solo vemos los backlinks propios (Bing Webmaster + DataForSEO Backlinks). Descubrir quién enlaza a un competidor exige un índice de enlaces propio o una herramienta de pago.</li>
       <li><strong>Por qué Google rankea a alguien por encima:</strong> el comparador del top-10 mide diferencias objetivas de las páginas (extensión, schema, autoría), pero la autoridad de dominio, los enlaces entrantes y el comportamiento de usuario no son observables desde fuera — nunca presentamos una diferencia medida como la causa del ranking.</li>
-      <li><strong>Citations en directorios locales</strong> (Yelp, Facebook, directorios del sector): requieren APIs externas no configuradas. El rating y el número de reseñas de Google Maps SÍ se miden (sección Local Pack).</li>
+      {_local_citations_item}
     </ul>
     """
 
@@ -1161,6 +1253,8 @@ async def generate_html_report(project: dict) -> str:
         ("action-media", f"🟢 Action Plan — Media ({len(medium)})", _issue_rows(medium)),
         ("tecnico", "🔧 Técnico", tecnico_html),
         ("js-rendering", "🖥️ Crawler propio vs renderizado con JS (DataForSEO On-Page)", js_rendering_block),
+        ("search-volume", "📊 Volumen de búsqueda real (Google Ads)", search_volume_block),
+        ("business-listings", "📍 Citas locales / listados de negocio (Business Listings)", business_listings_block),
         ("security-headers", "🔒 Headers de seguridad HTTP", security_headers_block),
         ("indexnow", "📡 IndexNow (Bing/Yandex/Seznam/Naver)", indexnow_block),
         ("contenido-eeat", "📝 Contenido y E-E-A-T por página", content_block),

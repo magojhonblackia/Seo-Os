@@ -910,6 +910,92 @@ async def test_reporte_incluye_js_rendering_check():
 
 
 @pytest.mark.asyncio
+async def test_reporte_incluye_volumen_de_busqueda_real():
+    """§ mejoras 2026-08-29: volumen de búsqueda real de Google Ads (DataForSEO
+    Keywords Data API). Usa la forma real verificada en vivo contra jc."""
+    project = _make_project("test-report-search-volume")
+    pid = project["id"]
+    with get_connection() as conn:
+        conn.execute(insert(snapshots).values(
+            project_id=pid, collector="search_volume", status="ok",
+            started_at=now_iso(), finished_at=now_iso(),
+            raw_data={"results": [
+                {"keyword": "reparacion de celulares cali", "search_volume": 170,
+                 "competition": "LOW", "competition_index": 2, "cpc": None, "monthly_searches": []},
+            ]},
+            created_at=now_iso(),
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-search-volume"))
+
+    section_idx = html.find("<h2>📊 Volumen de búsqueda real")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 700]
+    assert "reparacion de celulares cali" in section
+    assert "170" in section
+    assert "LOW" in section
+
+
+@pytest.mark.asyncio
+async def test_reporte_volumen_de_busqueda_declara_sin_datos():
+    project = _make_project("test-report-search-volume-vacio")
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-search-volume-vacio"))
+
+    section_idx = html.find("<h2>📊 Volumen de búsqueda real")
+    assert section_idx != -1
+    assert "Sin consulta todavía" in html[section_idx:section_idx + 300]
+
+
+@pytest.mark.asyncio
+async def test_reporte_incluye_business_listings():
+    """§ mejoras 2026-08-29: citas locales / listados de negocio (DataForSEO
+    Business Listings API). Usa el caso real verificado en vivo contra jc:
+    listado propio + un posible duplicado en la misma ciudad."""
+    project = _make_project("test-report-business-listings")
+    pid = project["id"]
+    with get_connection() as conn:
+        conn.execute(insert(snapshots).values(
+            project_id=pid, collector="business_listings", status="ok",
+            started_at=now_iso(), finished_at=now_iso(),
+            raw_data={
+                "business_title": "JC Reparaciones",
+                "total_items_found": 2,
+                "classification": {
+                    "own_listing": {"title": "JC REPARACIONES", "address": "Av. 5a Nte. #20-13, Cali", "phone": "+573163333400", "domain": "jcreparaciones.com"},
+                    "citations": [],
+                    "possible_duplicates": [
+                        {"title": "Jc Reparaciones", "address": "Cra. 103 #13 L, Ciudad Jardín, Cali", "is_claimed": False},
+                    ],
+                },
+            },
+            created_at=now_iso(),
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-business-listings"))
+
+    section_idx = html.find("<h2>📍 Citas locales")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 1200]
+    assert "JC REPARACIONES" in section
+    assert "Ciudad Jardín" in section
+    assert "posible" in section.lower()
+
+
+@pytest.mark.asyncio
+async def test_reporte_business_listings_declara_sin_datos():
+    project = _make_project("test-report-business-listings-vacio")
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-business-listings-vacio"))
+
+    section_idx = html.find("<h2>📍 Citas locales")
+    assert section_idx != -1
+    assert "Sin consulta todavía" in html[section_idx:section_idx + 300]
+
+
+@pytest.mark.asyncio
 async def test_reporte_js_rendering_declara_sin_datos():
     project = _make_project("test-report-js-rendering-vacio")
     with _mock_provider():

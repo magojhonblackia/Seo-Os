@@ -25,6 +25,52 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Volumen de búsqueda real y citas locales — 2 nuevas APIs de DataForSEO (2026-08-29/30)
+
+Pedido del usuario tras investigar el catálogo de DataForSEO ("ambas"), cierra
+dos huecos más que el reporte declaraba en "Lo que NO medimos todavía".
+
+**Volumen de búsqueda real (Google Ads)** — `backend/collectors/search_volume.py`,
+`keywords_data/google_ads/search_volume/live`. Reemplaza el "interés relativo
+0-100" de Trends por búsquedas/mes REALES, con histórico de 12 meses,
+competencia y CPC. Verificado en vivo contra jc antes de escribir el parseo:
+"reparacion de celulares cali" = 170 búsquedas/mes reales, competencia LOW.
+Costo plano $0.09 por consulta de hasta 1.000 keywords (no por keyword) — no
+se generan issues (dato de contexto, no un "problema" en sí mismo).
+
+**Citas locales / listados de negocio** — `backend/collectors/
+business_listings.py`, `business_data/business_listings/search/live`.
+Busca el nombre del negocio y separa: listado propio (por dominio), citas
+reales en otros directorios (mismo teléfono, dominio distinto — señal
+positiva) y posibles listados duplicados (nombre casi idéntico, sin
+teléfono/dominio que lo confirme — bandera para revisión manual, nunca
+certeza). Genera un issue medium por cada posible duplicado encontrado.
+
+- **Bug real encontrado y corregido en la MISMA verificación en vivo** (no
+  después): buscar solo por título, sin filtro geográfico, trajo negocios
+  con el mismo nombre genérico "JC Reparaciones" en México, Argentina y
+  Paraguay — la primera versión los marcó a los 12 como "posible duplicado"
+  por comparar solo el título normalizado. Corregido exigiendo que la
+  dirección del candidato comparta al menos un token de ciudad/región con
+  la dirección del listado PROPIO ya encontrado — sin listado propio
+  hallado (sin ancla de ubicación), no se marca ningún duplicado en vez de
+  arriesgar ruido global.
+- **Hallazgo real que sobrevivió la corrección**: jc SÍ tiene un posible
+  listado duplicado real en Cali — "Jc Reparaciones" en "Cra. 103 #13 L,
+  Ciudad Jardín, Cali, Valle del Cauca", sin teléfono ni dominio, dirección
+  distinta a la real (Av. 5a Nte. #20-13) — vale la pena que el usuario lo
+  revise en Google Business Profile.
+- Ambos wireados end-to-end: collector → endpoint dashboard → botón/tabla
+  en 🛰️ DataForSEO → sección del reporte (con `available`/`empty_reason`
+  honesto) → los 2 ítems correspondientes de "Lo que NO medimos todavía"
+  ahora son condicionales a `settings.has_dataforseo` (mismo patrón que
+  ChatGPT/Perplexity).
+- Tests: 26 nuevos (7 search_volume, 19 business_listings incluyendo la
+  regresión del bug de ubicación) + 4 de reporte. Suite: 769 → 799.
+- Verificado en vivo end-to-end contra jc real (servidor levantado, botones
+  reales): volumen real de "reparacion iphone cali" = 30 búsquedas/mes;
+  listados: 1 propio + 0 citas + 1 posible duplicado real (tras el fix).
+
 ### Páginas huérfanas: reconciliar issues de URLs que ya no existen (2026-08-28)
 
 Hallazgo colateral del fix de `noindex_justified` de arriba, implementado

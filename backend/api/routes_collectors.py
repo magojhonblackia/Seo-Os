@@ -22,6 +22,8 @@ from backend.collectors.competitor_keywords import run_competitor_keywords_colle
 from backend.collectors.geo_grid import run_geo_grid_collector
 from backend.collectors.js_rendering_check import run_js_rendering_check
 from backend.collectors.ai_overview_check import run_ai_overview_check
+from backend.collectors.search_volume import run_search_volume_check
+from backend.collectors.business_listings import run_business_listings_check
 from backend.collectors import progress as crawl_progress
 from backend.collectors.crawler import run_crawler
 from backend.collectors.geo import run_geo_collector
@@ -53,7 +55,7 @@ _ALLOWED_MODULES = {
     "crawler", "geo", "opportunities", "trends", "trends_related", "competitor", "backlinks", "local", "gsc",
     "pagespeed", "indexation", "rank_tracking", "local_rank", "sitemap", "ga4", "site_health", "security_headers",
     "indexnow", "question_ideas", "ai_visibility", "competitor_keywords", "geo_grid", "js_rendering_check",
-    "ai_overview_check",
+    "ai_overview_check", "search_volume", "business_listings",
 }
 
 
@@ -284,6 +286,42 @@ def trigger_collector(
                 project["slug"], keywords=payload.keywords,
                 location_code=payload.location_code, language_code=payload.language_code,
             )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "snapshot_id": result.get("snapshot_id"),
+            "status": result["status"],
+            "summary": result.get("summary") or ({"message": result["message"]} if result.get("message") else None),
+        }
+
+    if module == "search_volume":
+        # Disparo manual, no en la secuencia automática — costo real de pago
+        # ($0.09 plano hasta 1000 keywords), ver search_volume.py.
+        if not payload.keywords:
+            raise HTTPException(status_code=422, detail="El collector 'search_volume' requiere 'keywords'")
+        if not payload.location_code:
+            raise HTTPException(
+                status_code=422,
+                detail="El collector 'search_volume' requiere 'location_code' (ver docstring del módulo: nunca se adivina).",
+            )
+        try:
+            result = run_search_volume_check(
+                project["slug"], keywords=payload.keywords,
+                location_code=payload.location_code, language_code=payload.language_code,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "snapshot_id": result.get("snapshot_id"),
+            "status": result["status"],
+            "summary": result.get("summary") or ({"message": result["message"]} if result.get("message") else None),
+        }
+
+    if module == "business_listings":
+        # Disparo manual, no en la secuencia automática — costo real de pago
+        # (~$0.01-0.03 por búsqueda), ver business_listings.py.
+        try:
+            result = run_business_listings_check(project["slug"], business_title=payload.business_title)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {

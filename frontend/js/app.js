@@ -97,6 +97,8 @@ function wireStaticControls() {
   document.getElementById("ai-overview-btn").addEventListener("click", runAiOverviewCheck);
   document.getElementById("geo-grid-btn").addEventListener("click", runGeoGrid);
   document.getElementById("competitor-kw-btn").addEventListener("click", runCompetitorKeywordGaps);
+  document.getElementById("search-volume-btn").addEventListener("click", runSearchVolume);
+  document.getElementById("business-listings-btn").addEventListener("click", runBusinessListings);
 
   document.getElementById("open-new-project").addEventListener("click", () => {
     document.getElementById("new-project-error").textContent = "";
@@ -188,6 +190,7 @@ async function loadAll() {
     // js_rendering_check, ai_overview_check) tenían datos reales guardados pero
     // solo se veían dentro del reporte HTML largo — sin vista propia en el dashboard.
     loadJsRenderingCheck(), loadAiOverviewCheck(), loadGeoGrid(), loadCompetitorKeywordGaps(),
+    loadSearchVolume(), loadBusinessListings(),
   ]);
 }
 
@@ -771,6 +774,142 @@ async function runCompetitorKeywordGaps() {
   } catch (err) {
     statusEl.textContent = "";
     showToast(`Keyword gaps: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// § 2026-08-29: Volumen de búsqueda real (Google Ads) y Business Listings
+// (citas locales) vía DataForSEO — mismo patrón que los demás collectors
+// manuales de la pestaña 🛰️ DataForSEO (botón + status + tabla propia).
+async function loadSearchVolume() {
+  const container = document.getElementById("search-volume-table");
+  try {
+    const data = await apiFetch(`/api/dashboard/${state.activeSlug}/search-volume`);
+    if (!data.available) {
+      container.innerHTML = `<div class="empty-state">${escapeHtml(data.empty_reason)}</div>`;
+      return;
+    }
+    renderTable(
+      container,
+      [
+        { key: "keyword", label: "Keyword" },
+        { key: "search_volume", label: "Búsquedas/mes", mono: true, render: (r) => (r.search_volume ?? "—") },
+        { key: "competition", label: "Competencia", render: (r) => (r.competition ? escapeHtml(r.competition) : "—") },
+        { key: "cpc", label: "CPC", mono: true, render: (r) => (r.cpc != null ? `$${r.cpc.toFixed(2)}` : "—") },
+      ],
+      data.results,
+      "Sin consultas aún"
+    );
+    const dateNote = document.createElement("p");
+    dateNote.className = "compare-range";
+    dateNote.textContent = `Última consulta: ${data.checked_at} — dato real de Google Ads, no el interés relativo de Trends.`;
+    container.prepend(dateNote);
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function runSearchVolume() {
+  const btn = document.getElementById("search-volume-btn");
+  const statusEl = document.getElementById("search-volume-status");
+  const keywordsInput = document.getElementById("search-volume-keywords").value.trim();
+  const locationCode = document.getElementById("search-volume-location").value.trim();
+  if (!keywordsInput) {
+    showToast("Escribe al menos una keyword", "error");
+    return;
+  }
+  if (!locationCode) {
+    showToast("Falta location_code (ej: 2170 = Colombia) — nunca se adivina", "error");
+    return;
+  }
+  const keywords = keywordsInput.split(",").map((k) => k.trim()).filter(Boolean);
+
+  btn.disabled = true;
+  statusEl.textContent = `Consultando volumen real para ${keywords.length} keyword(s) (Google Ads vía DataForSEO)…`;
+  try {
+    const result = await apiFetch(`/api/collect/search_volume/${state.activeSlug}`, {
+      method: "POST",
+      body: JSON.stringify({ keywords, location_code: Number(locationCode) }),
+    });
+    if (result.status === "error" || result.status === "skipped") {
+      statusEl.textContent = "";
+      showToast(`Volumen: ${result.summary?.message || "no se pudo consultar"}`, "error");
+    } else {
+      statusEl.textContent = "Consulta completada.";
+      showToast("Volumen de búsqueda actualizado", "success");
+      await loadSearchVolume();
+    }
+  } catch (err) {
+    statusEl.textContent = "";
+    showToast(`Volumen: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadBusinessListings() {
+  const container = document.getElementById("business-listings-results");
+  try {
+    const data = await apiFetch(`/api/dashboard/${state.activeSlug}/business-listings`);
+    if (!data.available) {
+      container.innerHTML = `<div class="empty-state">${escapeHtml(data.empty_reason)}</div>`;
+      return;
+    }
+    const c = data.classification || {};
+    const own = c.own_listing;
+    const citations = c.citations || [];
+    const duplicates = c.possible_duplicates || [];
+
+    let html = `<p class="compare-range">Última búsqueda: ${escapeHtml(data.checked_at)} — "${escapeHtml(data.business_title)}", ${data.total_items_found} listado(s) encontrados en total.</p>`;
+
+    html += `<div class="issue-group"><h3>Listado propio</h3>`;
+    html += own
+      ? `<div class="issue-card"><div class="title">${escapeHtml(own.title)}</div><div class="meta">${escapeHtml(own.address || "sin dirección")} · ${escapeHtml(own.phone || "sin teléfono")} · ${escapeHtml(own.domain || "sin dominio")}</div></div>`
+      : `<div class="empty-state">No se encontró un listado con el dominio propio en los resultados.</div>`;
+    html += `</div>`;
+
+    html += `<div class="issue-group"><h3>Citas reales en otros directorios (${citations.length})</h3>`;
+    html += citations.length
+      ? citations.map((c2) => `<div class="issue-card"><div class="title">${escapeHtml(c2.title)}</div><div class="meta">${escapeHtml(c2.address || "sin dirección")} · mismo teléfono · ${escapeHtml(c2.domain || "sin dominio")}</div></div>`).join("")
+      : `<div class="empty-state">Ninguna encontrada — mismo teléfono, dominio distinto.</div>`;
+    html += `</div>`;
+
+    html += `<div class="issue-group"><h3>⚠️ Posibles listados duplicados (${duplicates.length}) — revisar manualmente</h3>`;
+    html += duplicates.length
+      ? duplicates.map((d) => `<div class="issue-card"><div class="title">${escapeHtml(d.title)}</div><div class="meta">${escapeHtml(d.address || "sin dirección")} · sin teléfono/dominio que lo confirme como cita real · reclamado: ${d.is_claimed ? "sí" : "no"}</div></div>`).join("")
+      : `<div class="empty-state">Ninguno encontrado.</div>`;
+    html += `</div>`;
+
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function runBusinessListings() {
+  const btn = document.getElementById("business-listings-btn");
+  const statusEl = document.getElementById("business-listings-status");
+  const title = document.getElementById("business-listings-title").value.trim();
+
+  btn.disabled = true;
+  statusEl.textContent = "Buscando listados de negocio (DataForSEO Business Listings)…";
+  try {
+    const result = await apiFetch(`/api/collect/business_listings/${state.activeSlug}`, {
+      method: "POST",
+      body: JSON.stringify({ business_title: title || null }),
+    });
+    if (result.status === "error" || result.status === "skipped") {
+      statusEl.textContent = "";
+      showToast(`Listados: ${result.summary?.message || "no se pudo consultar"}`, "error");
+    } else {
+      statusEl.textContent = "Búsqueda completada.";
+      showToast("Listados de negocio actualizados", "success");
+      await loadBusinessListings();
+    }
+  } catch (err) {
+    statusEl.textContent = "";
+    showToast(`Listados: ${err.message}`, "error");
   } finally {
     btn.disabled = false;
   }

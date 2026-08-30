@@ -587,6 +587,57 @@ def get_ai_overview_check(project: dict = Depends(get_project_or_404)) -> dict:
     return {"available": True, "checked_at": row[1], "results": results}
 
 
+@router.get("/{slug}/search-volume")
+def get_search_volume(project: dict = Depends(get_project_or_404)) -> dict:
+    """Volumen de búsqueda REAL de Google Ads por keyword — última corrida.
+    Disparo manual, ver backend/collectors/search_volume.py."""
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data, snapshots.c.finished_at, snapshots.c.status)
+            .where(snapshots.c.project_id == project["id"], snapshots.c.collector == "search_volume")
+            .order_by(desc(snapshots.c.id))
+            .limit(1)
+        ).first()
+
+    if row is None or row[2] != "ok":
+        return {
+            "available": False,
+            "empty_reason": "Sin consulta todavía — ejecuta 'search_volume' (requiere DataForSEO configurado).",
+        }
+
+    raw = row[0] or {}
+    return {"available": True, "checked_at": row[1], "results": raw.get("results") or []}
+
+
+@router.get("/{slug}/business-listings")
+def get_business_listings(project: dict = Depends(get_project_or_404)) -> dict:
+    """Citas locales / listados de negocio reales (DataForSEO Business
+    Listings) — última corrida. Disparo manual, ver
+    backend/collectors/business_listings.py."""
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data, snapshots.c.finished_at, snapshots.c.status)
+            .where(snapshots.c.project_id == project["id"], snapshots.c.collector == "business_listings")
+            .order_by(desc(snapshots.c.id))
+            .limit(1)
+        ).first()
+
+    if row is None or row[2] != "ok":
+        return {
+            "available": False,
+            "empty_reason": "Sin consulta todavía — ejecuta 'business_listings' (requiere DataForSEO configurado).",
+        }
+
+    raw = row[0] or {}
+    return {
+        "available": True,
+        "checked_at": row[1],
+        "business_title": raw.get("business_title"),
+        "total_items_found": raw.get("total_items_found"),
+        "classification": raw.get("classification"),
+    }
+
+
 @router.get("/{slug}/js-rendering-check")
 def get_js_rendering_check(project: dict = Depends(get_project_or_404)) -> dict:
     """Compara el crawler propio (HTML crudo) contra la versión renderizada

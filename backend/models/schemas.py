@@ -141,6 +141,10 @@ class CollectRequest(BaseModel):
     # § mejoras 2026-08-28: collector "js_rendering_check" — URLs específicas
     # a comparar; vacío = usa las páginas con más word_count ya crawleadas.
     urls: list[str] | None = Field(default=None, max_length=10)
+    # § mejoras 2026-08-29: collector "business_listings" — nombre del
+    # negocio a buscar; vacío = usa project.name. Ver docstring de
+    # business_listings.py.
+    business_title: str | None = Field(default=None, max_length=200)
 
 
 class CollectResult(BaseModel):
