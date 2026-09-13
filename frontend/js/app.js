@@ -97,6 +97,7 @@ function wireStaticControls() {
   document.getElementById("ai-overview-btn").addEventListener("click", runAiOverviewCheck);
   document.getElementById("geo-grid-btn").addEventListener("click", runGeoGrid);
   document.getElementById("competitor-kw-btn").addEventListener("click", runCompetitorKeywordGaps);
+  document.getElementById("competitor-discovery-btn").addEventListener("click", runCompetitorDiscovery);
   document.getElementById("search-volume-btn").addEventListener("click", runSearchVolume);
   document.getElementById("business-listings-btn").addEventListener("click", runBusinessListings);
 
@@ -190,7 +191,7 @@ async function loadAll() {
     // js_rendering_check, ai_overview_check) tenían datos reales guardados pero
     // solo se veían dentro del reporte HTML largo — sin vista propia en el dashboard.
     loadJsRenderingCheck(), loadAiOverviewCheck(), loadGeoGrid(), loadCompetitorKeywordGaps(),
-    loadSearchVolume(), loadBusinessListings(),
+    loadSearchVolume(), loadBusinessListings(), loadCompetitorDiscovery(),
   ]);
 }
 
@@ -707,6 +708,91 @@ async function loadCompetitors() {
   } catch (err) {
     matrixEl.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
     showToast(`Competidores: ${err.message}`, "error");
+  }
+}
+
+// § 2026-09-13: descubre competidores reales por overlap de keywords
+// (DataForSEO Labs competitors_domain) en vez de depender solo de
+// project.competitors, curado a mano — pedido explícito del usuario.
+async function loadCompetitorDiscovery() {
+  const container = document.getElementById("competitor-discovery-results");
+  try {
+    const data = await apiFetch(`/api/dashboard/${state.activeSlug}/competitor-discovery`);
+    if (!data.available) {
+      container.innerHTML = `<div class="empty-state">${escapeHtml(data.empty_reason)}</div>`;
+      return;
+    }
+    const alreadyTracked = new Set((data.already_tracked || []).map((d) => d.toLowerCase()));
+    let html = `<p class="compare-range">Última búsqueda: ${escapeHtml(data.checked_at)} — ${data.discovered.length} dominio(s) con overlap de keywords encontrados (${data.platforms_excluded.length} plataforma(s) excluida(s): ${escapeHtml(data.platforms_excluded.join(", ") || "ninguna")}).</p>`;
+
+    if (!data.analyzed.length) {
+      html += `<div class="empty-state">Sin competidores reales para expandir con keywords.</div>`;
+    } else {
+      html += data.analyzed
+        .map((a) => {
+          const isNew = !alreadyTracked.has((a.domain || "").toLowerCase());
+          const badge = isNew
+            ? '<span style="color:var(--accent-red); font-weight:600;">⚠️ NO registrado todavía</span>'
+            : '<span style="color:var(--text-muted);">ya registrado</span>';
+          const topKwRows = (a.top_keywords || [])
+            .slice(0, 10)
+            .map((k) => `<tr><td>${escapeHtml(k.keyword)}</td><td>#${k.position ?? "—"}</td><td>${k.search_volume ?? "—"}</td></tr>`)
+            .join("");
+          const gapRows = (a.gaps || [])
+            .slice(0, 10)
+            .map((g) => `<tr><td>${escapeHtml(g.keyword)}</td><td>#${g.position ?? "—"}</td><td>${g.search_volume ?? "—"}</td></tr>`)
+            .join("");
+          return `
+            <div class="issue-group">
+              <h3>${escapeHtml(a.domain)} — posición prom. ${a.avg_position != null ? a.avg_position.toFixed(1) : "—"}, ${a.intersections} keyword(s) en común · ${badge}</h3>
+              ${a.error ? `<div class="empty-state">Error consultando sus keywords: ${escapeHtml(a.error)}</div>` : `
+                <p style="font-size:12px; color:var(--text-muted);">Qué está haciendo bien (sus keywords de mayor volumen):</p>
+                <div class="table-wrapper" style="margin-bottom:8px;"><table><thead><tr><th>Keyword</th><th>Su posición</th><th>Volumen/mes</th></tr></thead><tbody>${topKwRows || '<tr><td colspan="3">Sin keywords rankeadas encontradas</td></tr>'}</tbody></table></div>
+                <p style="font-size:12px; color:var(--text-muted);">Gap real (tú sin ninguna impresión registrada):</p>
+                <div class="table-wrapper"><table><thead><tr><th>Keyword</th><th>Su posición</th><th>Volumen/mes</th></tr></thead><tbody>${gapRows || '<tr><td colspan="3">Sin gaps por encima del volumen mínimo</td></tr>'}</tbody></table></div>
+              `}
+            </div>
+          `;
+        })
+        .join("");
+    }
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = `<div class="empty-state">Error: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function runCompetitorDiscovery() {
+  const btn = document.getElementById("competitor-discovery-btn");
+  const statusEl = document.getElementById("competitor-discovery-status");
+  const locationCode = document.getElementById("competitor-discovery-location").value.trim();
+  if (!locationCode) {
+    showToast("Falta location_code (ej: 2170 = Colombia) — nunca se adivina", "error");
+    return;
+  }
+  btn.disabled = true;
+  statusEl.textContent = "Buscando competidores reales por overlap de keywords (DataForSEO Labs, cuesta cupo real)…";
+  try {
+    const result = await apiFetch(`/api/collect/competitor_discovery/${state.activeSlug}`, {
+      method: "POST",
+      body: JSON.stringify({ location_code: Number(locationCode) }),
+    });
+    if (result.status === "error" || result.status === "skipped") {
+      statusEl.textContent = "";
+      showToast(`Descubrir competidores: ${result.summary?.message || "no se pudo consultar"}`, "error");
+    } else {
+      const s = result.summary;
+      statusEl.textContent = s
+        ? `${s.real_competitors_count} competidor(es) real(es) encontrados, ${s.not_yet_tracked_count} sin registrar todavía.`
+        : "Búsqueda completada.";
+      showToast("Competidores reales actualizados", "success");
+      await loadCompetitorDiscovery();
+    }
+  } catch (err) {
+    statusEl.textContent = "";
+    showToast(`Descubrir competidores: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
   }
 }
 

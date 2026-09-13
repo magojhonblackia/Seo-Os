@@ -638,6 +638,38 @@ def get_business_listings(project: dict = Depends(get_project_or_404)) -> dict:
     }
 
 
+@router.get("/{slug}/competitor-discovery")
+def get_competitor_discovery(project: dict = Depends(get_project_or_404)) -> dict:
+    """Competidores reales descubiertos por overlap de keywords (DataForSEO
+    Labs competitors_domain) — última corrida. A diferencia de
+    /competitor-keywords (que solo compara contra project.competitors,
+    curado a mano), esto descubre rivales que nadie agregó todavía. Disparo
+    manual, ver backend/collectors/competitor_discovery.py."""
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data, snapshots.c.finished_at, snapshots.c.status)
+            .where(snapshots.c.project_id == project["id"], snapshots.c.collector == "competitor_discovery")
+            .order_by(desc(snapshots.c.id))
+            .limit(1)
+        ).first()
+
+    if row is None or row[2] != "ok":
+        return {
+            "available": False,
+            "empty_reason": "Sin búsqueda todavía — ejecuta 'competitor_discovery' (requiere DataForSEO configurado).",
+        }
+
+    raw = row[0] or {}
+    return {
+        "available": True,
+        "checked_at": row[1],
+        "discovered": raw.get("discovered") or [],
+        "platforms_excluded": raw.get("platforms_excluded") or [],
+        "analyzed": raw.get("analyzed") or [],
+        "already_tracked": raw.get("already_tracked") or [],
+    }
+
+
 @router.get("/{slug}/js-rendering-check")
 def get_js_rendering_check(project: dict = Depends(get_project_or_404)) -> dict:
     """Compara el crawler propio (HTML crudo) contra la versión renderizada

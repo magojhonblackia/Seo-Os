@@ -25,6 +25,56 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Descubrir competidores reales por overlap de keywords, no una lista a mano (2026-09-13)
+
+Pedido del usuario tras la investigación del catálogo de DataForSEO: "sí" a
+construir el descubrimiento de competidores + "saca la lista de palabras
+que ellos están utilizando, qué están haciendo bien".
+
+- `backend/collectors/competitor_discovery.py` (NUEVO):
+  `dataforseo_labs/google/competitors_domain/live` encuentra dominios que
+  rankean por las MISMAS keywords que el proyecto — a diferencia de
+  `competitor_keywords.py` (que solo compara contra `project.competitors`,
+  curado a mano y que puede estar incompleto/desactualizado).
+- Filtro real necesario, encontrado en la verificación en vivo:
+  instagram.com/facebook.com/tiktok.com aparecen en los resultados crudos
+  por compartir keywords de MARCA (los perfiles sociales del propio negocio
+  rankeando para "jc reparaciones") — no son negocios competidores. Se
+  excluyen con `_PLATFORM_DOMAINS`, una lista corta y explícita.
+- Para cada competidor real (hasta 5, tope de costo), reutiliza
+  `_fetch_ranked_keywords`/`find_keyword_gaps` de `competitor_keywords.py`
+  — mismo contrato, sin duplicar lógica — para traer su lista COMPLETA de
+  keywords rankeadas ("qué están haciendo bien") y el gap real contra
+  nosotros, no solo el nombre del dominio.
+- Sin issues (decisión consciente, P1): es una herramienta de
+  DESCUBRIMIENTO, no de seguimiento — generar issues aquí arriesgaría pisar
+  la reconciliación de `competitor_keywords.py` (misma categoría) o inflar
+  el Action Plan con competidores que el usuario ni ha decidido si le
+  importan. Agregar un competidor a `project.competitors` sigue siendo
+  decisión manual del usuario.
+- **Hallazgo real de la corrida en vivo contra jc**: de 14 dominios con
+  overlap real, 11 eran negocios reales (3 plataformas excluidas
+  correctamente) — de esos, **5 no estaban en la lista de competidores
+  registrados**. `celudigital.com.co` rankea en posición PROMEDIO 4.0 (nos
+  gana) con 42 keywords en común, y `jgexpertosenpantallas.com` (posición
+  8.5, 39 en común) — el mismo nombre que el usuario ya había mencionado
+  como sospecha en otro contexto (preguntas de comparación para AI
+  Visibility), ahora confirmado con datos reales. Matiz honesto encontrado
+  en la misma corrida: no todos los "competidores" descubiertos son
+  igual de relevantes — `solutekcolombia.com` comparte 42 keywords pero son
+  mayormente términos de marca genéricos de electrónica (autodesk, epson,
+  lenovo), no reparación de celulares — el overlap numérico no siempre
+  implica relevancia competitiva real, hay que revisar el detalle.
+- Wireado end-to-end: collector → endpoint dashboard → botón/tabla en 🛰️
+  DataForSEO (arriba del Gap de keywords existente) → sección del reporte.
+- Tests: 10 nuevos en `test_competitor_discovery.py` (incluye la regresión
+  del filtro de plataformas y del bug de mock — `_fetch_ranked_keywords`
+  revisa un `status_code` de nivel superior además del de `tasks[0]`,
+  distinto a `_fetch_competitors_domain`) + 2 de reporte. Suite: 801 → 813.
+- Verificado en vivo end-to-end contra jc real (servidor levantado, botón
+  real): 14 dominios encontrados, 3 plataformas excluidas, 5 competidores
+  reales sin registrar todavía, con sus keywords reales y gaps mostrados.
+
 ### Gap real cerrado: "Keywords Principales" solo mostraba el top 10, no las 149 reales de jc (2026-09-13)
 
 Pedido del usuario: re-auditar que todo lo analizado entre al reporte (mismo

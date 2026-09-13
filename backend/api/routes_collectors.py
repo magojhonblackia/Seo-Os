@@ -19,6 +19,7 @@ from backend.collectors.ai_visibility import run_ai_visibility_collector
 from backend.collectors.backlinks import run_backlinks_collector
 from backend.collectors.competitor import scan_competitor
 from backend.collectors.competitor_keywords import run_competitor_keywords_collector
+from backend.collectors.competitor_discovery import run_competitor_discovery
 from backend.collectors.geo_grid import run_geo_grid_collector
 from backend.collectors.js_rendering_check import run_js_rendering_check
 from backend.collectors.ai_overview_check import run_ai_overview_check
@@ -55,7 +56,7 @@ _ALLOWED_MODULES = {
     "crawler", "geo", "opportunities", "trends", "trends_related", "competitor", "backlinks", "local", "gsc",
     "pagespeed", "indexation", "rank_tracking", "local_rank", "sitemap", "ga4", "site_health", "security_headers",
     "indexnow", "question_ideas", "ai_visibility", "competitor_keywords", "geo_grid", "js_rendering_check",
-    "ai_overview_check", "search_volume", "business_listings",
+    "ai_overview_check", "search_volume", "business_listings", "competitor_discovery",
 }
 
 
@@ -322,6 +323,27 @@ def trigger_collector(
         # (~$0.01-0.03 por búsqueda), ver business_listings.py.
         try:
             result = run_business_listings_check(project["slug"], business_title=payload.business_title)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {
+            "snapshot_id": result.get("snapshot_id"),
+            "status": result["status"],
+            "summary": result.get("summary") or ({"message": result["message"]} if result.get("message") else None),
+        }
+
+    if module == "competitor_discovery":
+        # Disparo manual, no en la secuencia automática — costo real de pago
+        # (competitors_domain + ranked_keywords por cada competidor real
+        # expandido), ver competitor_discovery.py.
+        if not payload.location_code:
+            raise HTTPException(
+                status_code=422,
+                detail="El collector 'competitor_discovery' requiere 'location_code' (ver docstring del módulo: nunca se adivina).",
+            )
+        try:
+            result = run_competitor_discovery(
+                project["slug"], location_code=payload.location_code, language_code=payload.language_code,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {

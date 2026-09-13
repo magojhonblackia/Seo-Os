@@ -320,6 +320,22 @@
       <span id="geo-grid-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
       <div id="geo-grid-table" class="table-wrapper" style="margin-bottom:24px;"></div>
 
+      <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🔍 Descubrir competidores reales (por overlap de keywords, no una lista a mano)</h3>
+      <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
+        A diferencia de la sección de abajo (que compara contra los competidores que TÚ ya registraste a mano),
+        esto pregunta a Google Labs quién rankea de verdad por las mismas keywords que tú — puede encontrar un
+        rival real que nadie agregó todavía. Se excluyen redes sociales/plataformas (Instagram, Facebook, etc.)
+        aunque aparezcan en los resultados crudos, no son negocios competidores. Para cada competidor real
+        encontrado (hasta 5), trae también sus keywords rankeadas reales — qué están haciendo bien, no solo el
+        gap. Cuesta cupo real: 1 consulta de descubrimiento + hasta 5 de keywords.
+      </p>
+      <div class="filters-row">
+        <input id="competitor-discovery-location" type="text" placeholder="location_code (ej: 2170 = Colombia)" style="flex:1;" />
+        <button id="competitor-discovery-btn" type="button">🔍 Descubrir competidores reales</button>
+      </div>
+      <span id="competitor-discovery-status" style="font-size:12px; color:var(--text-muted); display:block; margin-bottom:8px;"></span>
+      <div id="competitor-discovery-results" style="margin-bottom:24px;"></div>
+
       <h3 style="margin:0 0 4px; font-size:13px; color:var(--text-secondary); text-transform:uppercase;">🔑 Gap real de keywords vs competidor (Labs Ranked Keywords — ranking real, no comparación de texto)</h3>
       <p style="font-size:12px; color:var(--text-muted); margin-top:0;">
         A diferencia del Keyword Gap de 🆚 Competidores (compara título/H1), esto consulta el ranking real de

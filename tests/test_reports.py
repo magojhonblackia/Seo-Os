@@ -871,6 +871,58 @@ async def test_reporte_gap_de_keywords_declara_no_consultado_sin_snapshot():
 
 
 @pytest.mark.asyncio
+async def test_reporte_incluye_competidores_descubiertos():
+    """§ mejoras 2026-09-13: descubrir competidores reales por overlap de
+    keywords (DataForSEO Labs competitors_domain) — usa el caso real
+    verificado en vivo contra jc (celudigital.com.co, posición promedio 3.95,
+    instagram.com/facebook.com excluidos como plataformas)."""
+    project = _make_project("test-report-competitor-discovery")
+    pid = project["id"]
+    with get_connection() as conn:
+        conn.execute(insert(snapshots).values(
+            project_id=pid, collector="competitor_discovery", status="ok",
+            started_at=now_iso(), finished_at=now_iso(),
+            raw_data={
+                "discovered": [{"domain": "celudigital.com.co", "avg_position": 3.95, "intersections": 42}],
+                "platforms_excluded": ["instagram.com", "facebook.com"],
+                "analyzed": [{
+                    "domain": "celudigital.com.co", "avg_position": 3.95, "intersections": 42,
+                    "keywords_found": 1,
+                    "top_keywords": [{"keyword": "reparar celular cali", "position": 3, "search_volume": 200}],
+                    "gaps": [{"keyword": "gap real de celudigital", "position": 5, "search_volume": 90}],
+                    "error": None,
+                }],
+                "already_tracked": [],
+            },
+            created_at=now_iso(),
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-competitor-discovery"))
+
+    section_idx = html.find("<h2>🔍 Descubrir competidores reales")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 1500]
+    assert "celudigital.com.co" in section
+    assert "4.0" in section  # avg_position 3.95 redondeado a 1 decimal (mismo criterio que el resto del reporte)
+    assert "reparar celular cali" in section
+    assert "gap real de celudigital" in section
+    assert "instagram.com" in section  # aparece en la lista de plataformas excluidas
+    assert "NO registrado" in section  # no está en already_tracked
+
+
+@pytest.mark.asyncio
+async def test_reporte_competidores_descubiertos_declara_sin_datos():
+    project = _make_project("test-report-competitor-discovery-vacio")
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-competitor-discovery-vacio"))
+
+    section_idx = html.find("<h2>🔍 Descubrir competidores reales")
+    assert section_idx != -1
+    assert "Sin búsqueda todavía" in html[section_idx:section_idx + 300]
+
+
+@pytest.mark.asyncio
 async def test_reporte_incluye_geo_grid():
     """§ mejoras 2026-08-28: geo-grid rank tracking (DataForSEO Maps SERP,
     pedido explícito del usuario) — visibilidad por punto geográfico, no un

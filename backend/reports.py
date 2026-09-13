@@ -33,6 +33,7 @@ from backend.api.routes_dashboard import (
     get_backlinks,
     get_toxic_backlinks,
     get_competitor_keyword_gaps,
+    get_competitor_discovery,
     get_competitors,
     get_competitor_detail,
     get_content,
@@ -249,6 +250,7 @@ async def generate_html_report(project: dict) -> str:
     question_ideas = get_question_ideas(project)
     competitors_data = get_competitors(project)
     competitor_keyword_gaps = get_competitor_keyword_gaps(project)
+    competitor_discovery = get_competitor_discovery(project)
     security_headers_data = get_security_headers(project)
     indexnow_data = get_indexnow_status(project)
     deltas = _score_history_deltas(project["id"])
@@ -894,6 +896,60 @@ async def generate_html_report(project: dict) -> str:
             )
         )
 
+    # ---------- Descubrir competidores reales por overlap de keywords (§
+    # mejoras 2026-09-13, DataForSEO Labs competitors_domain) — a diferencia
+    # de todo lo demás en este reporte, que compara contra competidores YA
+    # registrados a mano, esto los descubre por datos reales. ----------
+    if not competitor_discovery.get("available"):
+        competitor_discovery_block = f'<p class="muted">{_esc(competitor_discovery.get("empty_reason") or "Sin búsqueda todavía.")}</p>'
+    else:
+        cd_analyzed = competitor_discovery.get("analyzed") or []
+        cd_tracked_norm = {d.lower() for d in (competitor_discovery.get("already_tracked") or [])}
+        cd_excluded = competitor_discovery.get("platforms_excluded") or []
+        if not cd_analyzed:
+            competitor_discovery_block = '<p class="muted">Sin competidores reales para expandir con keywords.</p>'
+        else:
+            cd_sections = []
+            for a in cd_analyzed:
+                is_new = (a.get("domain") or "").lower() not in cd_tracked_norm
+                badge = "⚠️ NO registrado en project.competitors todavía" if is_new else "ya registrado"
+                if a.get("error"):
+                    cd_sections.append(
+                        f'<p><strong>{_esc(a["domain"])}</strong> ({badge}): <span class="muted">error consultando sus keywords: {_esc(a["error"])}</span></p>'
+                    )
+                    continue
+                top_kw = a.get("top_keywords") or []
+                gaps = a.get("gaps") or []
+                cd_sections.append(
+                    f'<p style="margin-top:10px;"><strong>{_esc(a["domain"])}</strong> — posición promedio '
+                    f'{a["avg_position"]:.1f}, {a["intersections"]} keyword(s) en común ({badge})</p>'
+                    + "<p class=\"muted\">Qué está haciendo bien (sus keywords de mayor volumen):</p>"
+                    + "<table><thead><tr><th>Keyword</th><th>Su posición</th><th>Volumen/mes</th></tr></thead><tbody>"
+                    + "".join(
+                        f'<tr><td>{_esc(k["keyword"])}</td><td>#{k.get("position", "—")}</td><td>{k.get("search_volume", "—")}</td></tr>'
+                        for k in top_kw[:10]
+                    )
+                    + "</tbody></table>"
+                    + (
+                        "<p class=\"muted\" style=\"margin-top:6px;\">Gap real (volumen que tú no tienes ninguna impresión registrada):</p>"
+                        "<table><thead><tr><th>Keyword</th><th>Su posición</th><th>Volumen/mes</th></tr></thead><tbody>"
+                        + "".join(
+                            f'<tr><td>{_esc(g["keyword"])}</td><td>#{g.get("position", "—")}</td><td>{g.get("search_volume", "—")}</td></tr>'
+                            for g in gaps[:10]
+                        )
+                        + "</tbody></table>"
+                        if gaps
+                        else ""
+                    )
+                )
+            competitor_discovery_block = (
+                '<p class="muted">Encontrados por overlap real de keywords en Google (DataForSEO Labs), no una '
+                "lista curada a mano — plataformas excluidas (no son negocios competidores): "
+                + (_esc(", ".join(cd_excluded)) if cd_excluded else "ninguna")
+                + ".</p>"
+                + "".join(cd_sections)
+            )
+
     # ---------- Gap real de keywords vs competidor, DataForSEO Labs (§ mejoras
     # 2026-08-28): a diferencia del gap de arriba (texto de título/H1), esto es
     # ranking real confirmado — keyword+posición+volumen que el competidor SÍ
@@ -1284,6 +1340,7 @@ async def generate_html_report(project: dict) -> str:
         ("geo-grid", "📍 Geo-grid rank tracking (visibilidad local por punto geográfico)", geo_grid_block),
         ("serp-real", "🔎 SERP real — contra quién competimos de verdad", serp_block),
         ("competidores", "🎯 Competidores", competitors_block),
+        ("competitor-discovery", "🔍 Descubrir competidores reales (por overlap de keywords)", competitor_discovery_block),
         ("keyword-gaps", "🔑 Gap real de keywords vs competidor (DataForSEO Labs)", competitor_keyword_gaps_block),
         ("backlinks", "🔗 Backlinks", backlinks_block),
         ("backlinks-toxicos", "☠️ Backlinks tóxicos por patrón", toxic_backlinks_block),
