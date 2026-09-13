@@ -11,23 +11,37 @@ from unittest.mock import patch
 from sqlalchemy import insert, select
 
 from backend.collectors.competitor_discovery import (
+    _core_terms_from_keywords,
     _domain_of,
     _fetch_competitors_domain,
+    _relevance_score,
+    _tokenize,
     run_competitor_discovery,
 )
 from backend.db.database import get_connection, now_iso
-from backend.db.schema import projects, snapshots
+from backend.db.schema import gsc_queries, projects, snapshots
 
 
-def _make_project(slug: str, competitors: list[str] | None = None) -> int:
+def _make_project(slug: str, competitors: list[str] | None = None, config: dict | None = None) -> int:
     with get_connection() as conn:
         return conn.execute(
             insert(projects).values(
                 slug=slug, name="Test Discovery", url="https://jcreparaciones-test.com",
                 gsc_property="sc-domain:jcreparaciones-test.com", country="CO", language="es",
-                competitors=competitors or [], is_active=True, config={}, created_at=now_iso(),
+                competitors=competitors or [], is_active=True, config=config or {}, created_at=now_iso(),
             )
         ).inserted_primary_key[0]
+
+
+def _add_gsc_query(project_id: int, query: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            insert(gsc_queries).values(
+                project_id=project_id, date="2026-09-01", query=query,
+                page="https://jcreparaciones-test.com/", clicks=1, impressions=10, position=5.0,
+                created_at=now_iso(),
+            )
+        )
 
 
 class _FakeResponse:
@@ -232,6 +246,162 @@ def test_run_no_marca_como_nuevo_un_competidor_ya_registrado():
             .order_by(snapshots.c.id.desc())
         ).first()
     assert row[0]["analyzed"][0]["error"] is None
+
+
+# ---------- Relevancia semántica (§ mejoras 2026-09-13, segunda vuelta) —
+# regresión directa de 2 falsos positivos reales encontrados por el usuario:
+# solutekcolombia.com (keywords "autodesk"/"epson"/"lenovo", nada que ver con
+# reparación de celulares) y celular-lab.com (keywords reales verificadas en
+# vivo: "como saber mi numero tigo", "como llamar a claro" — trámites de
+# operador, no reparación). ----------
+def test_tokenize_quita_acentos_stopwords_y_palabras_cortas():
+    tokens = _tokenize("¿Cómo saber mi número de Tigo?")
+    assert "tigo" in tokens
+    assert "numero" in tokens
+    assert "de" not in tokens  # stopword
+    assert "mi" not in tokens  # stopword
+
+
+def test_core_terms_exige_frecuencia_minima():
+    """Una palabra que aparece UNA sola vez entre las keywords propias no
+    debe contar como "núcleo" del negocio — evita que un término suelto
+    infle artificialmente el vocabulario real."""
+    our_keywords = {
+        "reparacion iphone cali", "reparacion samsung cali", "cambio pantalla iphone",
+        "palabra suelta unica",
+    }
+    core = _core_terms_from_keywords(our_keywords)
+    assert "reparacion" in core  # aparece 2 veces
+    assert "cali" in core  # aparece 2 veces
+    assert "suelta" not in core  # aparece 1 sola vez
+
+
+def test_relevance_score_caso_real_celular_lab_baja_relevancia():
+    """Keywords REALES de celular-lab.com, verificadas en vivo contra la
+    cuenta de jc — ninguna toca el vocabulario real del negocio."""
+    our_keywords = {
+        "reparacion de celulares cali", "reparacion iphone cali", "cambio pantalla samsung cali",
+        "microsoldadura cali", "servicio tecnico apple cali",
+    }
+    core_terms = _core_terms_from_keywords(our_keywords)
+    celular_lab_keywords = [
+        {"keyword": "como saber mi numero tigo"},
+        {"keyword": "como llamar a claro"},
+        {"keyword": "numeros para llamar a claro"},
+        {"keyword": "como sacar el numero de tigo"},
+    ]
+    score = _relevance_score(celular_lab_keywords, core_terms)
+    assert score["relevant_count"] == 0
+    assert score["relevance_pct"] == 0.0
+
+
+def test_relevance_score_caso_real_celudigital_alta_relevancia():
+    """Keywords REALES de celudigital.com.co (competidor real confirmado) —
+    deben tocar el vocabulario real de jc. our_keywords tiene suficiente
+    repetición de "iphone"/"samsung" para pasar MIN_CORE_TERM_FREQUENCY,
+    igual que las 149 keywords reales de jc en producción (esto NO se logra
+    con un puñado de keywords distintas, ver el test de "sin core terms")."""
+    our_keywords = {
+        "reparacion de celulares cali", "reparacion iphone cali", "cambio pantalla samsung cali",
+        "microsoldadura cali", "servicio tecnico apple cali", "cambio bateria iphone cali",
+        "reparacion samsung cali", "pantalla iphone rota cali", "servicio tecnico samsung cali",
+    }
+    core_terms = _core_terms_from_keywords(our_keywords)
+    celudigital_keywords = [
+        {"keyword": "iphone 7"},
+        {"keyword": "celulares cerca de mi"},
+        {"keyword": "servicios técnicos samsung"},
+        {"keyword": "teléfonos rotos"},
+    ]
+    score = _relevance_score(celudigital_keywords, core_terms)
+    assert score["relevant_count"] >= 2  # "iphone" y "samsung" son núcleo real
+    assert score["relevance_pct"] > 0
+
+
+def test_relevance_score_sin_core_terms_declara_none_no_inventa():
+    """Sin suficientes keywords propias para derivar un vocabulario
+    confiable, no se inventa un score (P1) — se declara None."""
+    score = _relevance_score([{"keyword": "cualquier cosa"}], core_terms=set())
+    assert score["relevance_pct"] is None
+
+
+def test_run_marca_low_relevance_en_competidor_de_otro_rubro():
+    """Integración de extremo a extremo: con nuestras keywords reales de GSC
+    ya trackeadas, un competidor 'descubierto' cuyas keywords no tocan el
+    vocabulario real del negocio debe quedar marcado low_relevance=True —
+    sin ocultarlo (P1), solo con la bandera."""
+    pid = _make_project("test-cd-baja-relevancia")
+    for kw in ["reparacion de celulares cali", "reparacion iphone cali", "cambio pantalla samsung cali"]:
+        _add_gsc_query(pid, kw)
+
+    discovered = [{"domain": "celular-lab.com", "avg_position": 19.8, "intersections": 37}]
+    fake_client = _FakeClient([
+        _competitors_domain_response(discovered),
+        _ranked_keywords_response([
+            _kw_item("como saber mi numero tigo", 13, 6600),
+            _kw_item("como llamar a claro", 25, 6600),
+            _kw_item("numeros para llamar a claro", 26, 6600),
+        ]),
+    ])
+    with patch("backend.collectors.competitor_discovery.get_secret", return_value="fake"), \
+         patch("backend.collectors.competitor_discovery.httpx") as mock_httpx, \
+         patch("backend.collectors.competitor_keywords.httpx") as mock_httpx_ck:
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+        mock_httpx_ck.Client.return_value = fake_client
+        mock_httpx_ck.HTTPError = Exception
+        result = run_competitor_discovery("test-cd-baja-relevancia", location_code=2170)
+
+    assert result["summary"]["low_relevance_count"] == 1
+
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data).where(snapshots.c.project_id == pid, snapshots.c.collector == "competitor_discovery")
+        ).first()
+    analyzed = row[0]["analyzed"][0]
+    assert analyzed["low_relevance"] is True
+    assert analyzed["relevance"]["relevance_pct"] == 0.0
+    # nunca se oculta el dominio (P1) — sigue en la lista, solo marcado
+    assert analyzed["domain"] == "celular-lab.com"
+
+
+# ---------- Exclusión manual persistente (§ mejoras 2026-09-13, segunda
+# vuelta) — pedido explícito: "agrega solutekcolombia.com y celular-lab.com
+# a la lista de exclusión". Mismo patrón sin-UI que noindex_justified_
+# patterns/banned_phrases/geo_grid: curado a mano en project.config. ----------
+def test_run_respeta_excluded_competitor_domains_de_la_config():
+    pid = _make_project(
+        "test-cd-exclusion-manual",
+        config={"excluded_competitor_domains": ["solutekcolombia.com"]},
+    )
+    discovered = [
+        {"domain": "solutekcolombia.com", "avg_position": 20.7, "intersections": 42},
+        {"domain": "celudigital.com.co", "avg_position": 3.95, "intersections": 42},
+    ]
+    fake_client = _FakeClient([
+        _competitors_domain_response(discovered),
+        _ranked_keywords_response([_kw_item("iphone 7", 5, 12100)]),
+    ])
+    with patch("backend.collectors.competitor_discovery.get_secret", return_value="fake"), \
+         patch("backend.collectors.competitor_discovery.httpx") as mock_httpx, \
+         patch("backend.collectors.competitor_keywords.httpx") as mock_httpx_ck:
+        mock_httpx.Client.return_value = fake_client
+        mock_httpx.HTTPError = Exception
+        mock_httpx_ck.Client.return_value = fake_client
+        mock_httpx_ck.HTTPError = Exception
+        result = run_competitor_discovery("test-cd-exclusion-manual", location_code=2170)
+
+    # solo se expande celudigital — solutekcolombia ni siquiera consume el
+    # tope de MAX_COMPETITORS_TO_EXPAND ni gasta una llamada de keywords
+    assert result["summary"]["analyzed_count"] == 1
+    assert result["summary"]["manually_excluded_count"] == 1
+
+    with get_connection() as conn:
+        row = conn.execute(
+            select(snapshots.c.raw_data).where(snapshots.c.project_id == pid, snapshots.c.collector == "competitor_discovery")
+        ).first()
+    assert row[0]["manually_excluded"] == ["solutekcolombia.com"]
+    assert row[0]["analyzed"][0]["domain"] == "celudigital.com.co"
 
 
 def test_run_no_genera_ningun_issue():

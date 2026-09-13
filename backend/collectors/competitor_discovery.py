@@ -44,12 +44,46 @@ todavía. La decisión de qué hacer con un competidor recién descubierto
 Disparo MANUAL (mismo criterio que competitor_keywords/geo_grid/etc.): cada
 corrida cuesta dinero real — competitors_domain ($0.013 verificado en vivo)
 + ranked_keywords por cada competidor expandido ($0.012 + $0.00012/keyword,
-hasta MAX_COMPETITORS_TO_EXPAND veces)."""
+hasta MAX_COMPETITORS_TO_EXPAND veces).
+
+§ mejoras 2026-09-13 (segunda vuelta), dos falsos positivos reales
+encontrados por el usuario en la PRIMERA corrida en vivo contra jc:
+- `solutekcolombia.com` (42 keywords en común, posición prom. ~21): sus
+  keywords compartidas son "autodesk", "epson", "lenovo colombia",
+  "kingston" — un distribuidor de IT corporativo, cero relación real con
+  reparación de celulares. El overlap textual crudo no distingue esto.
+- `celular-lab.com` (37 en común, posición prom. ~20): sus keywords son
+  "como saber mi numero tigo", "como llamar a claro" — un sitio de trámites
+  de operador telefónico, no un competidor de reparación.
+
+Fix: `_core_terms_from_keywords()` deriva el vocabulario real del NEGOCIO
+(no una lista fija por proyecto) de las propias keywords ya trackeadas en
+GSC — palabras que se repiten al menos `MIN_CORE_TERM_FREQUENCY` veces
+(para jc: "reparacion", "celular", "iphone", "samsung", "pantalla",
+"bateria", "cali", etc., NUNCA "autodesk" ni "tigo"). Para cada competidor
+ya expandido, `_relevance_score()` calcula qué % de SUS keywords rankeadas
+contienen al menos un término núcleo — sin llamadas extra a la API, ya se
+tenían las keywords fetchadas. Por debajo de `LOW_RELEVANCE_THRESHOLD` se
+marca `low_relevance=True` — NUNCA se oculta el dominio (P1: no esconder
+datos), se muestra con la bandera para que el usuario decida, con el score
+explícito (ej. "3/200 keywords de tu categoría, 1.5%") en vez de obligarlo
+a triagear a mano cada corrida comparando keyword por keyword.
+
+Además, `project.config["excluded_competitor_domains"]` (mismo patrón
+sin-UI que `noindex_justified_patterns`/`banned_phrases`/`geo_grid`,
+curado a mano) — una exclusión MANUAL y persistente por proyecto, para
+cuando el usuario ya revisó un dominio y decidió que no es competidor
+real: nunca vuelve a aparecer en corridas futuras, sin repetir el
+descarte. Se trata igual que `_PLATFORM_DOMAINS` (nunca se expande con
+ranked_keywords), pero se reporta aparte (`manually_excluded`) para no
+confundir "plataforma conocida" con "el usuario ya lo descartó"."""
 from __future__ import annotations
 
 import argparse
 import json
 import logging
+import re
+import unicodedata
 from urllib.parse import urlparse
 
 import httpx
@@ -67,6 +101,14 @@ REQUEST_TIMEOUT = 30.0
 MAX_DISCOVERED_COMPETITORS = 15  # cuántos trae competitors_domain antes de filtrar plataformas
 MAX_COMPETITORS_TO_EXPAND = 5  # de los reales (ya filtrados), a cuántos se les trae ranked_keywords (tope de costo)
 MAX_TOP_KEYWORDS_SHOWN = 20  # por competidor, ordenadas por volumen — no las 200 completas
+MIN_CORE_TERM_FREQUENCY = 2  # una palabra debe repetirse al menos esto en NUESTRAS keywords para contar como "núcleo"
+LOW_RELEVANCE_THRESHOLD = 0.4  # % mínimo de keywords del competidor que deben tocar nuestro vocabulario real
+
+_STOPWORDS = {
+    "de", "la", "el", "los", "las", "en", "y", "o", "a", "un", "una", "unos", "unas",
+    "para", "con", "por", "del", "al", "es", "su", "sus", "que", "se", "mi", "tu",
+    "como", "más", "menos", "sin", "sobre", "entre", "cerca",
+}
 
 # Plataformas donde un negocio suele tener presencia propia — NO son
 # competidores reales aunque compartan keywords de marca. Lista corta y
@@ -85,6 +127,43 @@ def _domain_of(url_or_domain: str | None) -> str:
     if "://" in raw:
         return (urlparse(raw).hostname or "").removeprefix("www.")
     return raw.removeprefix("www.")
+
+
+def _tokenize(text: str) -> list[str]:
+    normalized = "".join(c for c in unicodedata.normalize("NFD", text.lower()) if unicodedata.category(c) != "Mn")
+    words = re.findall(r"[a-z0-9]+", normalized)
+    return [w for w in words if len(w) > 2 and w not in _STOPWORDS]
+
+
+def _core_terms_from_keywords(our_keywords: set[str]) -> set[str]:
+    """Vocabulario real del negocio, derivado de SUS PROPIAS keywords reales
+    (GSC) — no una lista fija por rubro. Ver docstring del módulo: esto es
+    lo que distingue "reparacion"/"iphone"/"pantalla" (reales, repetidas en
+    jc) de "autodesk"/"tigo" (nunca aparecen en las keywords reales de jc,
+    aunque el competidor comparta ALGÚN término de búsqueda con nosotros)."""
+    counts: dict[str, int] = {}
+    for kw in our_keywords:
+        for token in set(_tokenize(kw)):  # set() para no sobre-contar repeticiones dentro de la misma keyword
+            counts[token] = counts.get(token, 0) + 1
+    return {token for token, count in counts.items() if count >= MIN_CORE_TERM_FREQUENCY}
+
+
+def _relevance_score(keywords: list[dict], core_terms: set[str]) -> dict:
+    """% de las keywords RANKEADAS del competidor que tocan nuestro
+    vocabulario real — sin llamadas extra a la API, reutiliza las keywords
+    ya fetchadas para el gap. Con core_terms vacío (proyecto sin suficientes
+    keywords propias todavía) no se puede calcular con confianza — se
+    declara así en vez de inventar un score (P1)."""
+    if not core_terms:
+        return {"relevant_count": None, "total_count": len(keywords), "relevance_pct": None}
+    if not keywords:
+        return {"relevant_count": 0, "total_count": 0, "relevance_pct": None}
+    relevant = sum(1 for k in keywords if set(_tokenize(k.get("keyword") or "")) & core_terms)
+    return {
+        "relevant_count": relevant,
+        "total_count": len(keywords),
+        "relevance_pct": round(100 * relevant / len(keywords), 1),
+    }
 
 
 def _fetch_competitors_domain(
@@ -146,24 +225,32 @@ def run_competitor_discovery(project_slug: str, location_code: int, language_cod
         return {"status": "skipped", "message": "DataForSEO sin configurar. Agrega login y password en Configuración."}
 
     own_domain = _domain_of(project.url)
+    excluded_domains = {_domain_of(d) for d in (project.config or {}).get("excluded_competitor_domains") or []}
+
+    from backend.analyzers.competitor_keywords import find_keyword_gaps
+    from backend.db.schema import gsc_queries
+
+    with get_connection() as conn:
+        our_keywords = {
+            r.query for r in conn.execute(
+                select(gsc_queries.c.query).distinct().where(gsc_queries.c.project_id == project.id)
+            )
+        }
+    core_terms = _core_terms_from_keywords(our_keywords)
+
     discovered_raw, error = _fetch_competitors_domain(login, password, own_domain, location_code, language_code)
     if error:
         status = "error"
         discovered_real = []
+        manually_excluded_hit = []
         analyzed = []
     else:
         status = "ok"
-        discovered_real = [d for d in discovered_raw if _domain_of(d["domain"]) not in _PLATFORM_DOMAINS]
-
-        from backend.analyzers.competitor_keywords import find_keyword_gaps
-        from backend.db.schema import gsc_queries
-
-        with get_connection() as conn:
-            our_keywords = {
-                r.query for r in conn.execute(
-                    select(gsc_queries.c.query).distinct().where(gsc_queries.c.project_id == project.id)
-                )
-            }
+        manually_excluded_hit = [d["domain"] for d in discovered_raw if _domain_of(d["domain"]) in excluded_domains]
+        discovered_real = [
+            d for d in discovered_raw
+            if _domain_of(d["domain"]) not in _PLATFORM_DOMAINS and _domain_of(d["domain"]) not in excluded_domains
+        ]
 
         analyzed = []
         for comp in discovered_real[:MAX_COMPETITORS_TO_EXPAND]:
@@ -172,6 +259,8 @@ def run_competitor_discovery(project_slug: str, location_code: int, language_cod
             top_keywords = sorted(
                 keywords, key=lambda k: k.get("search_volume") or 0, reverse=True
             )[:MAX_TOP_KEYWORDS_SHOWN]
+            relevance = _relevance_score(keywords, core_terms) if not kw_error else {"relevant_count": None, "total_count": 0, "relevance_pct": None}
+            low_relevance = relevance["relevance_pct"] is not None and relevance["relevance_pct"] < LOW_RELEVANCE_THRESHOLD * 100
             analyzed.append({
                 "domain": comp["domain"],
                 "avg_position": comp["avg_position"],
@@ -180,6 +269,8 @@ def run_competitor_discovery(project_slug: str, location_code: int, language_cod
                 "top_keywords": top_keywords,
                 "gaps": gaps,
                 "error": kw_error,
+                "relevance": relevance,
+                "low_relevance": low_relevance,
             })
 
     already_tracked = set(project.competitors or [])
@@ -198,7 +289,8 @@ def run_competitor_discovery(project_slug: str, location_code: int, language_cod
                 started_at=now, finished_at=now_iso(), error_message=error,
                 raw_data={
                     "discovered": discovered_raw,
-                    "platforms_excluded": [d["domain"] for d in discovered_raw if _domain_of(d["domain"]) in _PLATFORM_DOMAINS],
+                    "platforms_excluded": [d["domain"] for d in discovered_raw if _domain_of(d["domain"]) in _PLATFORM_DOMAINS] if not error else [],
+                    "manually_excluded": manually_excluded_hit,
                     "analyzed": analyzed,
                     "already_tracked": sorted(already_tracked),
                 },
@@ -216,6 +308,8 @@ def run_competitor_discovery(project_slug: str, location_code: int, language_cod
             "analyzed_count": len(analyzed),
             "not_yet_tracked_count": len(not_yet_tracked),
             "not_yet_tracked": not_yet_tracked,
+            "low_relevance_count": sum(1 for a in analyzed if a.get("low_relevance")),
+            "manually_excluded_count": len(manually_excluded_hit),
         },
     }
 

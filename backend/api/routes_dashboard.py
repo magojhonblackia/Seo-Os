@@ -665,6 +665,7 @@ def get_competitor_discovery(project: dict = Depends(get_project_or_404)) -> dic
         "checked_at": row[1],
         "discovered": raw.get("discovered") or [],
         "platforms_excluded": raw.get("platforms_excluded") or [],
+        "manually_excluded": raw.get("manually_excluded") or [],
         "analyzed": raw.get("analyzed") or [],
         "already_tracked": raw.get("already_tracked") or [],
     }

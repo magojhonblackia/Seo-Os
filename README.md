@@ -25,6 +25,46 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Filtro de relevancia semántica + exclusión manual persistente para "Descubrir competidores" (2026-09-13)
+
+El usuario revisó la primera corrida en vivo (arriba) y encontró 2 falsos
+positivos reales con evidencia concreta: `solutekcolombia.com` (keywords
+compartidas: "autodesk", "epson", "lenovo colombia" — un distribuidor de IT
+corporativo) y `celular-lab.com` (keywords: "como saber mi numero tigo",
+"como llamar a claro" — trámites de operador telefónico). Ambos comparten
+overlap textual amplio con jc pero CERO relación real con reparación de
+celulares — el overlap crudo de keywords no distingue esto.
+
+- `_core_terms_from_keywords()`: deriva el vocabulario real del negocio de
+  SUS PROPIAS keywords ya trackeadas en GSC (no una lista fija por rubro
+  hardcodeada) — palabras que se repiten al menos 2 veces entre las
+  keywords reales del proyecto. Para jc: "reparacion", "celular", "iphone",
+  "samsung", "pantalla", "bateria", "cali" — nunca "autodesk" ni "tigo".
+- `_relevance_score()`: para cada competidor ya expandido, qué % de SUS
+  keywords rankeadas tocan ese vocabulario real — sin llamadas extra a la
+  API (reutiliza las keywords ya fetchadas para el gap). Por debajo de 40%
+  se marca `low_relevance=True`.
+- **Nunca se oculta el dominio** (P1, decisión consciente): se muestra con
+  el score explícito y una advertencia visual, no se descarta en silencio —
+  el usuario decide, con el número real delante en vez de tener que
+  triagear keyword por keyword cada corrida.
+- `project.config["excluded_competitor_domains"]` (mismo patrón sin-UI que
+  `noindex_justified_patterns`/`banned_phrases`): exclusión MANUAL y
+  PERSISTENTE por proyecto — un dominio ya descartado una vez no vuelve a
+  aparecer (ni a gastar cupo de `ranked_keywords`) en corridas futuras.
+  Configurado ya para jc con los 2 dominios reales encontrados.
+- Verificado en vivo, antes y después del fix, contra jc real:
+  - Antes: 11 "competidores reales", sin ninguna señal de que 2 de ellos
+    eran ruido.
+  - Después: 9 competidores reales (los 2 excluidos ya no gastan cupo),
+    los 5 que se expandieron con keywords tienen relevancia real 67-98%
+    contra las 149 keywords reales de jc — confirma que el filtro no
+    penaliza a los competidores genuinos, solo a los falsos positivos.
+- Tests: 7 nuevos (tokenización, vocabulario núcleo con frecuencia mínima,
+  score de relevancia con los casos REALES de celular-lab/celudigital,
+  degradación honesta sin core_terms, integración de bajo-relevancia,
+  integración de exclusión manual) + 1 de reporte. Suite: 813 → 821.
+
 ### Descubrir competidores reales por overlap de keywords, no una lista a mano (2026-09-13)
 
 Pedido del usuario tras la investigación del catálogo de DataForSEO: "sí" a

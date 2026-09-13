@@ -906,6 +906,7 @@ async def generate_html_report(project: dict) -> str:
         cd_analyzed = competitor_discovery.get("analyzed") or []
         cd_tracked_norm = {d.lower() for d in (competitor_discovery.get("already_tracked") or [])}
         cd_excluded = competitor_discovery.get("platforms_excluded") or []
+        cd_manually_excluded = competitor_discovery.get("manually_excluded") or []
         if not cd_analyzed:
             competitor_discovery_block = '<p class="muted">Sin competidores reales para expandir con keywords.</p>'
         else:
@@ -918,11 +919,23 @@ async def generate_html_report(project: dict) -> str:
                         f'<p><strong>{_esc(a["domain"])}</strong> ({badge}): <span class="muted">error consultando sus keywords: {_esc(a["error"])}</span></p>'
                     )
                     continue
+                rel = a.get("relevance") or {}
+                if rel.get("relevance_pct") is None:
+                    relevance_line = '<span class="muted">Relevancia: sin suficientes keywords propias para calcular.</span>'
+                elif a.get("low_relevance"):
+                    relevance_line = (
+                        f'<span style="color:#dc2626;"><strong>⚠️ Baja relevancia real: {rel["relevant_count"]}/{rel["total_count"]} '
+                        f'keywords de tu categoría ({rel["relevance_pct"]}%)</strong> — revisar antes de considerarlo competidor real, '
+                        "el overlap textual crudo no distingue esto.</span>"
+                    )
+                else:
+                    relevance_line = f'<span class="muted">Relevancia: {rel["relevant_count"]}/{rel["total_count"]} keywords de tu categoría ({rel["relevance_pct"]}%).</span>'
                 top_kw = a.get("top_keywords") or []
                 gaps = a.get("gaps") or []
                 cd_sections.append(
                     f'<p style="margin-top:10px;"><strong>{_esc(a["domain"])}</strong> — posición promedio '
                     f'{a["avg_position"]:.1f}, {a["intersections"]} keyword(s) en común ({badge})</p>'
+                    + f'<p style="margin:2px 0 6px;">{relevance_line}</p>'
                     + "<p class=\"muted\">Qué está haciendo bien (sus keywords de mayor volumen):</p>"
                     + "<table><thead><tr><th>Keyword</th><th>Su posición</th><th>Volumen/mes</th></tr></thead><tbody>"
                     + "".join(
@@ -946,7 +959,13 @@ async def generate_html_report(project: dict) -> str:
                 '<p class="muted">Encontrados por overlap real de keywords en Google (DataForSEO Labs), no una '
                 "lista curada a mano — plataformas excluidas (no son negocios competidores): "
                 + (_esc(", ".join(cd_excluded)) if cd_excluded else "ninguna")
-                + ".</p>"
+                + "."
+                + (
+                    f' Excluidos a mano por decisión previa del usuario: {_esc(", ".join(cd_manually_excluded))}.'
+                    if cd_manually_excluded
+                    else ""
+                )
+                + "</p>"
                 + "".join(cd_sections)
             )
 

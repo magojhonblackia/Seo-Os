@@ -912,6 +912,49 @@ async def test_reporte_incluye_competidores_descubiertos():
 
 
 @pytest.mark.asyncio
+async def test_reporte_marca_baja_relevancia_y_exclusion_manual():
+    """§ mejoras 2026-09-13 (segunda vuelta): regresión de los 2 falsos
+    positivos reales que el usuario encontró (solutekcolombia.com,
+    celular-lab.com) — el reporte debe mostrar el score de relevancia real
+    y la nota de exclusión manual, sin ocultar el dominio de baja
+    relevancia (P1: nunca esconder datos, solo marcarlos)."""
+    project = _make_project("test-report-competitor-discovery-relevancia")
+    pid = project["id"]
+    with get_connection() as conn:
+        conn.execute(insert(snapshots).values(
+            project_id=pid, collector="competitor_discovery", status="ok",
+            started_at=now_iso(), finished_at=now_iso(),
+            raw_data={
+                "discovered": [{"domain": "celular-lab.com", "avg_position": 19.8, "intersections": 37}],
+                "platforms_excluded": [],
+                "manually_excluded": ["solutekcolombia.com"],
+                "analyzed": [{
+                    "domain": "celular-lab.com", "avg_position": 19.8, "intersections": 37,
+                    "keywords_found": 4,
+                    "top_keywords": [{"keyword": "como saber mi numero tigo", "position": 13, "search_volume": 6600}],
+                    "gaps": [],
+                    "error": None,
+                    "relevance": {"relevant_count": 0, "total_count": 4, "relevance_pct": 0.0},
+                    "low_relevance": True,
+                }],
+                "already_tracked": [],
+            },
+            created_at=now_iso(),
+        ))
+
+    with _mock_provider():
+        html = await generate_html_report(get_project_or_404("test-report-competitor-discovery-relevancia"))
+
+    section_idx = html.find("<h2>🔍 Descubrir competidores reales")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 2000]
+    assert "celular-lab.com" in section  # NUNCA se oculta, solo se marca
+    assert "Baja relevancia real" in section
+    assert "0/4" in section
+    assert "solutekcolombia.com" in section  # nota de exclusión manual
+
+
+@pytest.mark.asyncio
 async def test_reporte_competidores_descubiertos_declara_sin_datos():
     project = _make_project("test-report-competitor-discovery-vacio")
     with _mock_provider():

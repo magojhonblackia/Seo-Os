@@ -723,7 +723,7 @@ async function loadCompetitorDiscovery() {
       return;
     }
     const alreadyTracked = new Set((data.already_tracked || []).map((d) => d.toLowerCase()));
-    let html = `<p class="compare-range">Última búsqueda: ${escapeHtml(data.checked_at)} — ${data.discovered.length} dominio(s) con overlap de keywords encontrados (${data.platforms_excluded.length} plataforma(s) excluida(s): ${escapeHtml(data.platforms_excluded.join(", ") || "ninguna")}).</p>`;
+    let html = `<p class="compare-range">Última búsqueda: ${escapeHtml(data.checked_at)} — ${data.discovered.length} dominio(s) con overlap de keywords encontrados (${data.platforms_excluded.length} plataforma(s) excluida(s): ${escapeHtml(data.platforms_excluded.join(", ") || "ninguna")}${data.manually_excluded.length ? `, ${data.manually_excluded.length} excluido(s) a mano: ${escapeHtml(data.manually_excluded.join(", "))}` : ""}).</p>`;
 
     if (!data.analyzed.length) {
       html += `<div class="empty-state">Sin competidores reales para expandir con keywords.</div>`;
@@ -734,6 +734,12 @@ async function loadCompetitorDiscovery() {
           const badge = isNew
             ? '<span style="color:var(--accent-red); font-weight:600;">⚠️ NO registrado todavía</span>'
             : '<span style="color:var(--text-muted);">ya registrado</span>';
+          const rel = a.relevance || {};
+          const relevanceBadge = rel.relevance_pct == null
+            ? '<span style="color:var(--text-muted);">relevancia: sin suficientes keywords propias para calcular</span>'
+            : a.low_relevance
+              ? `<span style="color:var(--accent-red); font-weight:600;">⚠️ baja relevancia real: ${rel.relevant_count}/${rel.total_count} keywords de tu categoría (${rel.relevance_pct}%) — revisar antes de considerarlo competidor</span>`
+              : `<span style="color:var(--accent-green);">relevancia: ${rel.relevant_count}/${rel.total_count} keywords de tu categoría (${rel.relevance_pct}%)</span>`;
           const topKwRows = (a.top_keywords || [])
             .slice(0, 10)
             .map((k) => `<tr><td>${escapeHtml(k.keyword)}</td><td>#${k.position ?? "—"}</td><td>${k.search_volume ?? "—"}</td></tr>`)
@@ -745,6 +751,7 @@ async function loadCompetitorDiscovery() {
           return `
             <div class="issue-group">
               <h3>${escapeHtml(a.domain)} — posición prom. ${a.avg_position != null ? a.avg_position.toFixed(1) : "—"}, ${a.intersections} keyword(s) en común · ${badge}</h3>
+              <p style="font-size:12px; margin:2px 0 8px;">${relevanceBadge}</p>
               ${a.error ? `<div class="empty-state">Error consultando sus keywords: ${escapeHtml(a.error)}</div>` : `
                 <p style="font-size:12px; color:var(--text-muted);">Qué está haciendo bien (sus keywords de mayor volumen):</p>
                 <div class="table-wrapper" style="margin-bottom:8px;"><table><thead><tr><th>Keyword</th><th>Su posición</th><th>Volumen/mes</th></tr></thead><tbody>${topKwRows || '<tr><td colspan="3">Sin keywords rankeadas encontradas</td></tr>'}</tbody></table></div>
