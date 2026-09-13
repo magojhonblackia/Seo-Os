@@ -2999,6 +2999,7 @@ function copyTextToClipboard(text) {
 async function runAllDataForSeoTools() {
   const btn = document.getElementById("dataforseo-all-btn");
   const statusEl = document.getElementById("dataforseo-all-status");
+  const resultsEl = document.getElementById("dataforseo-all-results");
   const keywords = document.getElementById("dataforseo-all-keywords").value.trim();
   const locationCode = document.getElementById("dataforseo-all-location").value.trim();
   if (!keywords || !locationCode) {
@@ -3025,8 +3026,11 @@ async function runAllDataForSeoTools() {
   ];
 
   btn.disabled = true;
+  resultsEl.innerHTML = "";
+  let i = 0;
   for (const [label, fn] of steps) {
-    statusEl.textContent = `Ejecutando: ${label}…`;
+    i += 1;
+    statusEl.textContent = `Ejecutando (${i}/${steps.length}): ${label}… esto puede tardar, cada una es una llamada real a DataForSEO.`;
     try {
       await fn();
     } catch (err) {
@@ -3037,9 +3041,24 @@ async function runAllDataForSeoTools() {
   statusEl.textContent = "Armando el reporte completo de DataForSEO…";
   try {
     const result = await apiFetch(`/api/dashboard/${state.activeSlug}/mini-report/dataforseo-all`);
-    await copyTextToClipboard(result.text);
-    statusEl.textContent = "✅ Análisis completo terminado — reporte de DataForSEO copiado al portapapeles.";
-    showToast("Análisis completo de DataForSEO copiado al portapapeles", "success");
+    statusEl.textContent = "✅ Análisis completo terminado.";
+    resultsEl.innerHTML = `
+      <div class="empty-state" style="font-size:12px; margin-bottom:8px;">
+        ✅ Reporte completo de DataForSEO listo (${result.text.length.toLocaleString("es")} caracteres) — dale click a
+        "Copiar" para pegarlo donde lo necesites, o revísalo directamente abajo.
+      </div>
+      <button id="dataforseo-all-copy-btn" type="button">📋 Copiar reporte completo</button>
+      <pre style="max-height:400px; overflow:auto; font-size:11px; background:var(--bg-secondary); padding:8px; border-radius:6px; margin-top:8px; white-space:pre-wrap;">${escapeHtml(result.text)}</pre>
+    `;
+    document.getElementById("dataforseo-all-copy-btn").addEventListener("click", async () => {
+      try {
+        await copyTextToClipboard(result.text);
+        showToast("Reporte completo de DataForSEO copiado al portapapeles", "success");
+      } catch (err) {
+        showToast(`No se pudo copiar (selecciona el texto de abajo y copia manual): ${err.message}`, "error");
+      }
+    });
+    showToast("Análisis completo de DataForSEO terminado", "success");
   } catch (err) {
     statusEl.textContent = "";
     showToast(`Reporte completo de DataForSEO: ${err.message}`, "error");
