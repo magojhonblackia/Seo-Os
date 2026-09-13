@@ -317,6 +317,35 @@ async def test_reporte_keywords_reales_de_gsc():
 
 
 @pytest.mark.asyncio
+async def test_reporte_keywords_muestra_hasta_40_no_solo_10():
+    """Regresión real (2026-09-13): la sección solo mostraba el top 10 aunque
+    GSC tuviera cientos de queries reales (caso real: jc con 149) — 139+
+    keywords con posición/clics/impresiones reales nunca aparecían en el
+    reporte, solo en la pestaña Rankings del dashboard."""
+    project = _make_project("test-report-keywords-muchas")
+    now = now_iso()
+    with get_connection() as conn:
+        for i in range(55):
+            conn.execute(
+                insert(gsc_queries).values(
+                    project_id=project["id"], date="2026-07-10", query=f"keyword real numero {i}",
+                    page="https://reporte-test.com/x", clicks=0, impressions=100 - i, ctr=0.0, position=20.0,
+                    created_at=now,
+                )
+            )
+    with _mock_provider():
+        html = await generate_html_report(project)
+
+    section_idx = html.find("<h2>🔑 Keywords Principales")
+    assert section_idx != -1
+    section = html[section_idx:section_idx + 6000]
+    assert "keyword real numero 0" in section  # la de mayor impresiones, top 1
+    assert "keyword real numero 39" in section  # la #40 por impresiones, todavía visible
+    assert "keyword real numero 54" not in section  # más allá del top 40, no debe aparecer
+    assert "Mostrando 40 de 55" in section
+
+
+@pytest.mark.asyncio
 async def test_reporte_oportunidad_cerca_del_top10_real():
     """Keyword en posición 11-20 con impresiones reales debe aparecer en la
     sección de oportunidades — a diferencia de 'posición estimada' inventada."""

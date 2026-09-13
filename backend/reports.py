@@ -356,7 +356,13 @@ async def generate_html_report(project: dict) -> str:
     )
 
     # ---------- Keywords principales (reales, de Search Console) ----------
-    top_keywords = sorted(keywords_data.get("keywords", []), key=lambda r: r.get("impressions", 0), reverse=True)[:10]
+    # § 2026-09-13: mostraba solo el top 10 aunque GSC pudiera tener cientos
+    # de queries reales (ej. 149 en jc) — 139 keywords con posición/clics/
+    # impresiones reales nunca aparecían en el reporte, solo en la pestaña
+    # Rankings del dashboard. Mismo criterio de truncación ya usado en
+    # Preguntas reales (top 40 + nota de cuántas hay en total).
+    all_keywords_sorted = sorted(keywords_data.get("keywords", []), key=lambda r: r.get("impressions", 0), reverse=True)
+    top_keywords = all_keywords_sorted[:40]
     keywords_block = (
         f'<p class="muted">{_esc(keywords_data.get("empty_reason"))}</p>'
         if keywords_data.get("empty_reason")
@@ -368,6 +374,11 @@ async def generate_html_report(project: dict) -> str:
                 for r in top_keywords
             )
             + "</tbody></table>"
+            + (
+                f'<p class="muted" style="margin-top:6px;">Mostrando 40 de {len(all_keywords_sorted)}.</p>'
+                if len(all_keywords_sorted) > 40
+                else ""
+            )
         )
     )
 

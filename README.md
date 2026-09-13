@@ -25,6 +25,29 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Gap real cerrado: "Keywords Principales" solo mostraba el top 10, no las 149 reales de jc (2026-09-13)
+
+Pedido del usuario: re-auditar que todo lo analizado entre al reporte (mismo
+tipo de verificación que ya había encontrado el gap de security_headers/
+indexnow). Cruzando cada endpoint de dashboard contra los imports de
+`reports.py`, todo lo demás ya estaba cubierto — el único hueco real: la
+sección "Keywords Principales" cortaba a `[:10]` sin importar cuántas
+queries reales hubiera en Search Console. Contra jc real: **149 keywords
+con posición/clics/impresiones reales, solo 10 visibles en el reporte** —
+139 nunca aparecían ahí, solo en la pestaña Rankings del dashboard (que no
+se copia/pega en una conversación de IA, a diferencia del reporte).
+
+- Subido a top 40 (mismo criterio de truncación ya usado en "Preguntas
+  reales de Google": top 40 + nota "Mostrando 40 de N" cuando hay más).
+- La pestaña Rankings sigue teniendo su propio gráfico de tendencia diaria
+  (clics/impresiones/CTR/posición en el tiempo) que el reporte, siendo
+  texto/tablas, no reproduce — decisión de diseño existente, no un gap: el
+  dato agregado (`clics 28d`) ya vive en Scorecards.
+- Test de regresión con 55 keywords sintéticas verificando que la #40
+  aparece y la #55 no. Verificado en vivo contra jc real: "Mostrando 40 de
+  149".
+- Suite: 800 → 801.
+
 ### Bug real: reporte tumbaba con 500 por un `effort="30min"` fuera de contrato (2026-09-12)
 
 Encontrado durante un escaneo completo con todas las herramientas contra jc:
