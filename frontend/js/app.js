@@ -101,6 +101,14 @@ function wireStaticControls() {
   document.getElementById("search-volume-btn").addEventListener("click", runSearchVolume);
   document.getElementById("business-listings-btn").addEventListener("click", runBusinessListings);
 
+  document.getElementById("js-rendering-report-btn").addEventListener("click", () => copyMiniReport("js_rendering_check", "js-rendering-report-btn"));
+  document.getElementById("ai-overview-report-btn").addEventListener("click", () => copyMiniReport("ai_overview_check", "ai-overview-report-btn"));
+  document.getElementById("geo-grid-report-btn").addEventListener("click", () => copyMiniReport("geo_grid", "geo-grid-report-btn"));
+  document.getElementById("competitor-discovery-report-btn").addEventListener("click", () => copyMiniReport("competitor_discovery", "competitor-discovery-report-btn"));
+  document.getElementById("competitor-kw-report-btn").addEventListener("click", () => copyMiniReport("competitor_keywords", "competitor-kw-report-btn"));
+  document.getElementById("search-volume-report-btn").addEventListener("click", () => copyMiniReport("search_volume", "search-volume-report-btn"));
+  document.getElementById("business-listings-report-btn").addEventListener("click", () => copyMiniReport("business_listings", "business-listings-report-btn"));
+
   document.getElementById("open-new-project").addEventListener("click", () => {
     document.getElementById("new-project-error").textContent = "";
     document.getElementById("new-project-form").reset();
@@ -2978,6 +2986,27 @@ function copyTextToClipboard(text) {
     return navigator.clipboard.writeText(text).catch(() => _copyTextFallback(text));
   }
   return _copyTextFallback(text);
+}
+
+// § mejoras 2026-09-13: mini-reporte independiente por herramienta — solo
+// lee la última snapshot de ESA herramienta (misma fuente que la pestaña),
+// sin generar el reporte completo (que consulta ~29 fuentes y quema más
+// tiempo/tokens de los que hacen falta para revisar un solo dato).
+async function copyMiniReport(tool, btnId) {
+  const btn = document.getElementById(btnId);
+  const original = btn.textContent;
+  btn.disabled = true;
+  try {
+    const result = await apiFetch(`/api/dashboard/${state.activeSlug}/mini-report/${tool}`);
+    await copyTextToClipboard(result.text);
+    btn.textContent = "✅ Copiado";
+    showToast("Reporte de la herramienta copiado al portapapeles", "success");
+  } catch (err) {
+    showToast(`No se pudo copiar el reporte: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { btn.textContent = original; }, 2000);
+  }
 }
 
 async function copyActionPlan() {

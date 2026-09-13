@@ -29,6 +29,7 @@ from backend.analyzers.opportunities import (
 from backend.analyzers.serp_analysis import discover_real_competitors, find_who_beats_us
 from backend.analyzers.technical import analyze_page, page_data_from_stored_row
 from backend.api.deps import get_project_or_404
+from backend.mini_reports import MINI_REPORT_BUILDERS
 from backend.db.database import gsc_daily_totals_last_n_days, get_connection, latest_gsc_query_date, now_iso
 from backend.db.schema import (
     backlinks,
@@ -1180,6 +1181,32 @@ def get_competitor_keyword_gaps(project: dict = Depends(get_project_or_404)) -> 
     if not domains:
         return {"domains": [], "empty_reason": "Sin competidores registrados para este proyecto."}
     return {"domains": domains}
+
+
+_MINI_REPORT_SOURCES = {
+    "js_rendering_check": get_js_rendering_check,
+    "ai_overview_check": get_ai_overview_check,
+    "geo_grid": get_geo_grid,
+    "search_volume": get_search_volume,
+    "business_listings": get_business_listings,
+    "competitor_discovery": get_competitor_discovery,
+    "competitor_keywords": get_competitor_keyword_gaps,
+}
+
+
+@router.get("/{slug}/mini-report/{tool}")
+def get_mini_report(tool: str, project: dict = Depends(get_project_or_404)) -> dict:
+    """Reporte independiente de UNA sola herramienta (§ mejoras 2026-09-13,
+    pedido explícito del usuario): a diferencia de /report (que arma la
+    página completa con ~29 fuentes), esto solo lee la última snapshot de
+    `tool` — mismo costo que abrir esa pestaña, cero llamadas nuevas a
+    APIs pagas — y devuelve texto plano listo para copiar/pegar en un chat
+    de IA sin gastar tokens de sobra."""
+    getter = _MINI_REPORT_SOURCES.get(tool)
+    builder = MINI_REPORT_BUILDERS.get(tool)
+    if getter is None or builder is None:
+        raise HTTPException(status_code=404, detail=f"Herramienta '{tool}' no reconocida para mini-reporte")
+    return {"text": builder(getter(project))}
 
 
 @router.get("/{slug}/competitors/{domain}/detail")

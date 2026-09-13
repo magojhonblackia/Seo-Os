@@ -25,6 +25,41 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Botón "📋 Reporte" independiente por herramienta en la pestaña DataForSEO (2026-09-13)
+
+Pedido del usuario: el reporte principal (`generate_html_report`) lee ~29
+fuentes distintas y arma una página completa — para revisar el resultado de
+UNA sola herramienta (ej. solo Volumen de búsqueda) eso es lento y quema
+tokens de sobra si el destino es pegarlo en un chat de IA.
+
+- `backend/mini_reports.py` (nuevo): 7 funciones puras
+  `build_X_mini_report(data) -> str`, una por herramienta de la pestaña
+  🛰️ DataForSEO (`js_rendering_check`, `ai_overview_check`, `geo_grid`,
+  `search_volume`, `business_listings`, `competitor_discovery`,
+  `competitor_keywords`). Cada una recibe el MISMO dict que ya devuelve su
+  `get_X(project)` de `routes_dashboard.py` y devuelve texto plano en tablas
+  simples — sin HTML, listo para copiar/pegar.
+- `GET /api/dashboard/{slug}/mini-report/{tool}` (nuevo endpoint): despacha
+  por nombre de herramienta a su `get_X` + su builder. Es la MISMA lectura
+  de snapshot que ya hacía la pestaña — cero llamadas nuevas a APIs pagas,
+  cero de las ~28 fuentes restantes que sí lee el reporte completo, y sin
+  el paso de resumen por IA (DeepSeek) que el reporte completo sí dispara.
+- Frontend: un botón "📋 Reporte" nuevo al lado de cada botón de ejecutar en
+  `index.html`, wireado en `app.js` vía una única función genérica
+  `copyMiniReport(tool, btnId)` que reusa el `copyTextToClipboard()` que ya
+  existía (usado por el plan de acción y la tabla técnica) — sin duplicar
+  lógica de portapapeles.
+- Verificado en vivo contra jc real: `search_volume` devuelve sus 4
+  keywords reales con volumen/competencia/CPC, `competitor_discovery`
+  devuelve los 9 competidores reales con su score de relevancia y gaps
+  completos — mismo contenido que esas secciones del reporte completo, en
+  una fracción del tiempo, confirmado con click real en el navegador
+  (toast "copiado" + portapapeles del sistema cambiado).
+- Tests: 17 nuevos en `tests/test_mini_reports.py` (degradación honesta sin
+  datos y contenido real por cada una de las 7 herramientas, más 3 de
+  integración del endpoint incluyendo 404 para una herramienta desconocida).
+  Suite: 821 → 838.
+
 ### Filtro de relevancia semántica + exclusión manual persistente para "Descubrir competidores" (2026-09-13)
 
 El usuario revisó la primera corrida en vivo (arriba) y encontró 2 falsos
