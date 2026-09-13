@@ -1355,8 +1355,12 @@ def get_action_plan(project: dict = Depends(get_project_or_404)) -> dict:
         )
         mago_issues.append((mi, d))
 
+    # Bug real 2026-09-12: un effort fuera del contrato ("30min", nunca
+    # validado en tiempo de ejecución) tumbaba el reporte entero con
+    # KeyError al indexar con []. .get(..., 1) degrada con gracia — ver
+    # mago.sort_by_priority para la corrección gemela y la causa raíz.
     effort_rank = {"5min": 0, "1h": 1, "1d": 2}
-    mago_issues.sort(key=lambda pair: (-pair[0].impact, effort_rank[pair[0].effort]))
+    mago_issues.sort(key=lambda pair: (-pair[0].impact, effort_rank.get(pair[0].effort, 1)))
 
     grouped = {"critical": [], "high": [], "medium": []}
     for mi, d in mago_issues:

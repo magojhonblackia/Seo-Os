@@ -25,6 +25,33 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Bug real: reporte tumbaba con 500 por un `effort="30min"` fuera de contrato (2026-09-12)
+
+Encontrado durante un escaneo completo con todas las herramientas contra jc:
+`/api/dashboard/jc/report` devolvía **500 Internal Server Error** al entrar.
+
+- Causa raíz: `build_backlinks_issues()` (`backend/analyzers/backlinks.py`)
+  crea el issue resumen de "N backlinks tóxicos" con `effort="30min"` — un
+  valor FUERA del contrato `Effort = Literal["5min", "1h", "1d"]`
+  (`backend/analyzers/mago.py`). Python no valida `Literal` en tiempo de
+  ejecución, así que esto se guardó en la tabla `issues` sin ningún error
+  durante meses — recién truena cuando `get_action_plan()` ordena por
+  `effort_rank[issue.effort]`, un dict que solo tiene esas 3 claves reales
+  (confirmado con un grep: TODO el resto del proyecto, sin excepción, solo
+  usa esas 3). `KeyError: '30min'` tumbaba el reporte entero.
+- Corregido en 3 capas: (1) causa raíz — `effort="30min"` → `"1h"` en
+  `backlinks.py`; (2) datos ya guardados — 2 filas reales de jc en `issues`
+  con `effort='30min'` corregidas directo en `data/seo.db`; (3) endurecido
+  `effort_rank[...]` → `effort_rank.get(..., 1)` en los DOS lugares que
+  ordenan por effort (`mago.sort_by_priority` y
+  `routes_dashboard.get_action_plan`) — un valor fuera de contrato futuro
+  degrada con gracia en vez de tumbar la página.
+- Test de regresión: `build_backlinks_issues()` ahora se verifica contra el
+  set real de valores válidos, no solo un valor de ejemplo — falla si
+  alguien reintroduce un effort fuera de contrato.
+- Verificado en vivo: `/report` volvía 500 antes del fix, 200 después,
+  mismo servidor, mismos datos.
+
 ### Volumen de búsqueda real y citas locales — 2 nuevas APIs de DataForSEO (2026-08-29/30)
 
 Pedido del usuario tras investigar el catálogo de DataForSEO ("ambas"), cierra

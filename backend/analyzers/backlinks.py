@@ -217,7 +217,7 @@ def build_backlinks_issues(total_count: int, toxic_count: int) -> list[MagoIssue
             current=None,
             suggested=f"Revisa el archivo disavow.txt generado y súbelo a Search Console si confirmas que son spam ({toxic_count} dominios).",
             page_url=None,
-            effort="30min",
+            effort="1h",
             impact=4 if severity == "critical" else 3,
         )
     ]

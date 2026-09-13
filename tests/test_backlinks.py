@@ -113,6 +113,19 @@ def test_build_issues_medium_cuando_ratio_bajo():
     assert issues[0].severity == "medium"
 
 
+def test_build_issues_effort_es_un_valor_valido_del_contrato():
+    """Regresión de un bug real (2026-09-12): este issue se creaba con
+    effort="30min", un valor FUERA del contrato Effort = Literal["5min",
+    "1h", "1d"] (backend/analyzers/mago.py) — Python no valida Literal en
+    tiempo de ejecución, así que se guardaba en la DB sin error, y el 500
+    solo aparecía después, al abrir el reporte (get_action_plan ordena por
+    effort_rank[issue.effort], que no tiene la clave "30min" -> KeyError).
+    Este test falla si alguien reintroduce un effort fuera de las 3 claves
+    reales que usa TODO el resto del proyecto."""
+    issues = build_backlinks_issues(total_count=10, toxic_count=2)
+    assert issues[0].effort in {"5min", "1h", "1d"}
+
+
 # ---------- Collector (mockeado, sin red real) ----------
 
 def _make_project(slug: str) -> int:

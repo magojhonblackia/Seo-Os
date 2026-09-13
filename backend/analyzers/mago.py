@@ -55,6 +55,15 @@ class MagoIssue:
 
 
 def sort_by_priority(issues: list[MagoIssue]) -> list[MagoIssue]:
-    """Prioridad = impact DESC, effort ASC (§6.3)."""
+    """Prioridad = impact DESC, effort ASC (§6.3).
+
+    Bug real 2026-09-12: un analyzer creó un issue con effort="30min", fuera
+    del contrato `Effort` (Python no valida Literal en tiempo de ejecución) —
+    quedó guardado en la DB sin error hasta que esto lo indexaba con `[]` y
+    tiraba KeyError, tumbando el reporte entero. `.get(..., 1)` (rango de
+    "1h") degrada con gracia ante cualquier valor fuera de contrato en vez de
+    romper toda la página — la causa raíz se corrige en el analyzer que lo
+    generó, esto es solo para que un descuido similar no vuelva a tumbar
+    nada."""
     effort_rank = {"5min": 0, "1h": 1, "1d": 2}
-    return sorted(issues, key=lambda i: (-i.impact, effort_rank[i.effort]))
+    return sorted(issues, key=lambda i: (-i.impact, effort_rank.get(i.effort, 1)))
