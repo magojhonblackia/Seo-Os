@@ -108,6 +108,7 @@ function wireStaticControls() {
   document.getElementById("competitor-kw-report-btn").addEventListener("click", () => copyMiniReport("competitor_keywords", "competitor-kw-report-btn"));
   document.getElementById("search-volume-report-btn").addEventListener("click", () => copyMiniReport("search_volume", "search-volume-report-btn"));
   document.getElementById("business-listings-report-btn").addEventListener("click", () => copyMiniReport("business_listings", "business-listings-report-btn"));
+  document.getElementById("dataforseo-all-btn").addEventListener("click", runAllDataForSeoTools);
 
   document.getElementById("open-new-project").addEventListener("click", () => {
     document.getElementById("new-project-error").textContent = "";
@@ -2986,6 +2987,65 @@ function copyTextToClipboard(text) {
     return navigator.clipboard.writeText(text).catch(() => _copyTextFallback(text));
   }
   return _copyTextFallback(text);
+}
+
+// § mejoras 2026-09-13: un solo botón que corre las 7 herramientas de la
+// pestaña DataForSEO en secuencia (nunca en paralelo — evita disparar
+// llamadas pagas duplicadas/simultáneas) y arma el reporte completo SOLO
+// de DataForSEO al final. Reusa las mismas funciones runX() de cada
+// herramienta individual — cada una ya valida sus propios campos y
+// muestra su propio toast de error, así que un campo faltante en una
+// herramienta no detiene a las demás.
+async function runAllDataForSeoTools() {
+  const btn = document.getElementById("dataforseo-all-btn");
+  const statusEl = document.getElementById("dataforseo-all-status");
+  const keywords = document.getElementById("dataforseo-all-keywords").value.trim();
+  const locationCode = document.getElementById("dataforseo-all-location").value.trim();
+  if (!keywords || !locationCode) {
+    showToast("Completa keywords y location_code para correr el análisis completo — nunca se adivinan", "error");
+    return;
+  }
+
+  document.getElementById("ai-overview-keywords").value = keywords;
+  document.getElementById("ai-overview-location").value = locationCode;
+  document.getElementById("geo-grid-keywords").value = keywords;
+  document.getElementById("competitor-discovery-location").value = locationCode;
+  document.getElementById("competitor-kw-location").value = locationCode;
+  document.getElementById("search-volume-keywords").value = keywords;
+  document.getElementById("search-volume-location").value = locationCode;
+
+  const steps = [
+    ["🖥️ Crawler vs renderizado con JS", runJsRenderingCheck],
+    ["🌐 AI Overview", runAiOverviewCheck],
+    ["📍 Geo-grid", runGeoGrid],
+    ["🔍 Descubrir competidores reales", runCompetitorDiscovery],
+    ["🔑 Gap de keywords vs competidor", runCompetitorKeywordGaps],
+    ["📊 Volumen de búsqueda real", runSearchVolume],
+    ["📍 Citas locales", runBusinessListings],
+  ];
+
+  btn.disabled = true;
+  for (const [label, fn] of steps) {
+    statusEl.textContent = `Ejecutando: ${label}…`;
+    try {
+      await fn();
+    } catch (err) {
+      // cada runX() ya mostró su propio toast de error — seguimos con las demás
+    }
+  }
+
+  statusEl.textContent = "Armando el reporte completo de DataForSEO…";
+  try {
+    const result = await apiFetch(`/api/dashboard/${state.activeSlug}/mini-report/dataforseo-all`);
+    await copyTextToClipboard(result.text);
+    statusEl.textContent = "✅ Análisis completo terminado — reporte de DataForSEO copiado al portapapeles.";
+    showToast("Análisis completo de DataForSEO copiado al portapapeles", "success");
+  } catch (err) {
+    statusEl.textContent = "";
+    showToast(`Reporte completo de DataForSEO: ${err.message}`, "error");
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // § mejoras 2026-09-13: mini-reporte independiente por herramienta — solo

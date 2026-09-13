@@ -25,6 +25,43 @@ LocalBusiness), alertas
 por Telegram, reportes HTML/PDF y auth opcional por token — todo validado
 contra `jcreparaciones.com` y sus competidores reales en producción.
 
+### Botón "🚀 Realizar análisis completo" — las 7 herramientas de DataForSEO de una vez (2026-09-13)
+
+Pedido del usuario tras el punto anterior: además del botón individual por
+herramienta, quería poder correr TODAS las herramientas de la pestaña
+DataForSEO con un solo click y obtener un reporte completo solo de esa
+pestaña — sin perder la opción de hacerlo herramienta por herramienta.
+
+- Dos campos compartidos (keywords + location_code) al inicio de la
+  pestaña 🛰️ DataForSEO, más un botón "🚀 Realizar análisis completo".
+- `runAllDataForSeoTools()` (`app.js`): precarga esos dos valores
+  compartidos en los campos individuales de cada herramienta (AI Overview,
+  Geo-grid, Descubrir competidores, Gap vs competidor, Volumen de
+  búsqueda), después ejecuta las 7 funciones `runX()` ya existentes EN
+  SECUENCIA (nunca en paralelo — cada llamada espera a que la anterior
+  termine, para no disparar varias peticiones pagas simultáneas). Cada
+  `runX()` ya valida sus propios campos y muestra su propio toast de
+  error, así que si una herramienta falla las demás igual se ejecutan.
+- Al terminar, pide `GET /api/dashboard/{slug}/mini-report/dataforseo-all`
+  (nuevo endpoint, `routes_dashboard.py`): concatena los 7 mini-reportes ya
+  existentes de `backend/mini_reports.py` con un separador — cero fuentes
+  nuevas, reusa exactamente los mismos `get_X`/builders del botón
+  individual — y copia el resultado combinado al portapapeles.
+- El endpoint específico `/mini-report/dataforseo-all` se registra ANTES
+  que `/mini-report/{tool}` en `routes_dashboard.py` — si no, FastAPI lo
+  interpretaría como una herramienta llamada "dataforseo-all" y devolvería
+  404 (bug real encontrado y evitado en el diseño, no en producción).
+- Verificado en vivo contra jc real con `fetch` interceptado para no gastar
+  cupo real de las 7 APIs pagas en cada prueba: las 7 llamadas a
+  `/api/collect/*` salen en el orden correcto con los valores compartidos
+  correctamente precargados en cada campo individual, y el reporte
+  combinado final trae los ~25KB de texto real (mismo contenido que pedir
+  cada mini-reporte por separado).
+- Tests: 3 nuevos en `tests/test_mini_reports.py` (concatenación de las 7
+  secciones sin datos, la ruta específica no se confunde con el patrón
+  `{tool}`, datos reales de una herramienta aparecen en el combinado).
+  Suite: 838 → 841.
+
 ### Botón "📋 Reporte" independiente por herramienta en la pestaña DataForSEO (2026-09-13)
 
 Pedido del usuario: el reporte principal (`generate_html_report`) lee ~29

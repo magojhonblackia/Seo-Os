@@ -1194,6 +1194,25 @@ _MINI_REPORT_SOURCES = {
 }
 
 
+_DATAFORSEO_ALL_ORDER = [
+    "js_rendering_check", "ai_overview_check", "geo_grid",
+    "competitor_discovery", "competitor_keywords", "search_volume", "business_listings",
+]
+
+
+@router.get("/{slug}/mini-report/dataforseo-all")
+def get_full_dataforseo_mini_report(project: dict = Depends(get_project_or_404)) -> dict:
+    """Reporte completo SOLO de las 7 herramientas de la pestaña
+    🛰️ DataForSEO (§ mejoras 2026-09-13, pedido explícito del usuario: un
+    botón que corra todo y arme un reporte completo, sin pasar por
+    /report — que además lee ~22 fuentes que no son de DataForSEO). Debe
+    registrarse ANTES de /mini-report/{tool} para que "dataforseo-all" no
+    se interprete como un nombre de herramienta desconocido."""
+    separator = "\n\n" + "=" * 60 + "\n\n"
+    parts = [MINI_REPORT_BUILDERS[tool](_MINI_REPORT_SOURCES[tool](project)) for tool in _DATAFORSEO_ALL_ORDER]
+    return {"text": separator.join(parts)}
+
+
 @router.get("/{slug}/mini-report/{tool}")
 def get_mini_report(tool: str, project: dict = Depends(get_project_or_404)) -> dict:
     """Reporte independiente de UNA sola herramienta (§ mejoras 2026-09-13,

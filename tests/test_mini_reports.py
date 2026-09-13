@@ -182,3 +182,44 @@ def test_endpoint_lee_snapshot_real_sin_tocar_el_reporte_completo():
     assert resp.status_code == 200
     text = resp.json()["text"]
     assert "reparacion celular" in text and "800" in text
+
+
+# ---------- Endpoint: /api/dashboard/{slug}/mini-report/dataforseo-all ----------
+
+def test_endpoint_dataforseo_all_concatena_las_7_herramientas_sin_datos():
+    project = _make_project("test-mini-report-dataforseo-all-vacio")
+    resp = client.get(f"/api/dashboard/{project['slug']}/mini-report/dataforseo-all")
+    assert resp.status_code == 200
+    text = resp.json()["text"]
+    # Cada una de las 7 herramientas debe aparecer, aunque todas declaren "sin datos"
+    for title_fragment in [
+        "Crawler propio vs renderizado", "AI Overview real", "Geo-grid",
+        "Competidores reales descubiertos", "Gap real de keywords vs competidor",
+        "Volumen de búsqueda real", "Citas locales",
+    ]:
+        assert title_fragment in text
+    assert text.count("=" * 60) == 6  # 7 secciones = 6 separadores
+
+
+def test_endpoint_dataforseo_all_no_se_confunde_con_nombre_de_herramienta():
+    """'dataforseo-all' no debe ser interpretado por /mini-report/{tool} como
+    una herramienta desconocida — la ruta específica debe ganar."""
+    project = _make_project("test-mini-report-dataforseo-all-ruta")
+    resp = client.get(f"/api/dashboard/{project['slug']}/mini-report/dataforseo-all")
+    assert resp.status_code == 200
+    assert "no reconocida" not in resp.json()["text"]
+
+
+def test_endpoint_dataforseo_all_incluye_datos_reales_de_una_herramienta():
+    project = _make_project("test-mini-report-dataforseo-all-con-datos")
+    with get_connection() as conn:
+        conn.execute(
+            insert(snapshots).values(
+                project_id=project["id"], collector="search_volume", status="ok",
+                started_at=now_iso(), finished_at=now_iso(), error_message=None, created_at=now_iso(),
+                raw_data={"results": [{"keyword": "reparacion iphone bogota", "search_volume": 500, "competition": "LOW", "cpc": 0.2}]},
+            )
+        )
+    resp = client.get(f"/api/dashboard/{project['slug']}/mini-report/dataforseo-all")
+    assert resp.status_code == 200
+    assert "reparacion iphone bogota" in resp.json()["text"]
