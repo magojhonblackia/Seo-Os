@@ -211,14 +211,22 @@ def test_summarize_vacio_no_revienta():
 
 
 def test_fetch_respeta_robots_del_sitio_ajeno():
-    """P5: si el robots.txt del competidor prohíbe la URL, no se descarga."""
+    """P5: si el robots.txt del competidor prohíbe la URL, no se descarga.
+
+    `validate_public_url` se mockea (igual que en el test de SSRF de abajo):
+    sin esto, el test depende de que el DNS real resuelva 'ajeno.com' a una
+    IP pública en el momento de correr la suite — en una red sin salida a
+    Internet (ej. un sandbox CI sin DNS) la resolución falla, el guard SSRF
+    bloquea la URL ANTES de llegar al robots.txt, y el test falla por un
+    motivo que no tiene nada que ver con lo que dice verificar."""
     from backend.collectors.serp_compare import _fetch_and_measure
 
     client = MagicMock()
     robots_resp = MagicMock(status_code=200, text="User-agent: *\nDisallow: /")
     client.get.return_value = robots_resp
 
-    assert _fetch_and_measure(client, "https://ajeno.com/privado") is None
+    with patch("backend.collectors.serp_compare.validate_public_url", side_effect=lambda url: url):
+        assert _fetch_and_measure(client, "https://ajeno.com/privado") is None
     # solo pidió robots.txt, nunca la página
     assert client.get.call_count == 1
 
